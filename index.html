@@ -1,0 +1,1822 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="dark">
+<title>Brew Bowl Fantasy Draft Simulator</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Inter:wght@400;600;700;800&display=swap" rel="stylesheet">
+<style>
+  html,body{margin:0;padding:0;background:#0D1012;}
+  #root{min-height:100vh;}
+  .boot{color:#7B8884;font-family:system-ui,sans-serif;text-align:center;padding:60px 20px;font-size:.9rem;}
+</style>
+</head>
+<body>
+<div id="root"><div class="boot">Loading the draft board…</div></div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.3.1/umd/react.production.min.js" crossorigin></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.3.1/umd/react-dom.production.min.js" crossorigin></script>
+<script>
+/* ---------------------------------------------------------------
+   Local save support. The app was written for Claude's artifact
+   storage; here it reads and writes your own browser's localStorage.
+   Nothing is uploaded — the data never leaves this device.
+   --------------------------------------------------------------- */
+(function () {
+  var PREFIX = "bbfl-";
+  function key(k) { return PREFIX + String(k); }
+  window.storage = {
+    get: function (k) {
+      return new Promise(function (res, rej) {
+        try {
+          var v = window.localStorage.getItem(key(k));
+          if (v === null) rej(new Error("not found")); else res({ key: k, value: v });
+        } catch (e) { rej(e); }
+      });
+    },
+    set: function (k, v) {
+      return new Promise(function (res, rej) {
+        try { window.localStorage.setItem(key(k), String(v)); res({ key: k, value: v }); }
+        catch (e) { rej(e); }
+      });
+    },
+    delete: function (k) {
+      return new Promise(function (res, rej) {
+        try { window.localStorage.removeItem(key(k)); res({ key: k, deleted: true }); }
+        catch (e) { rej(e); }
+      });
+    },
+    list: function (prefix) {
+      return new Promise(function (res) {
+        var keys = [];
+        for (var i = 0; i < window.localStorage.length; i++) {
+          var k = window.localStorage.key(i);
+          if (k.indexOf(PREFIX) === 0) keys.push(k.slice(PREFIX.length));
+        }
+        res({ keys: keys });
+      });
+    }
+  };
+})();
+</script>
+
+<script>
+var useState = React.useState, useMemo = React.useMemo,
+    useEffect = React.useEffect, useRef = React.useRef;
+
+const MANAGERS = ["Jake", "Bruno", "Pink", "Tim", "Trey", "Roy", "Doug", "Alec", "Con", "Eric", "Nate", "Tyler"];
+// World Cup nation each manager rode to their draft slot (for the setup-screen order board)
+const WC_TEAM = { Tim: "🇪🇸 Spain", Jake: "🇦🇷 Argentina", Alec: "🏴󠁧󠁢󠁥󠁮󠁧󠁿 England", Bruno: "🇫🇷 France", Roy: "🇧🇪 Belgium", Trey: "🇳🇴 Norway", Nate: "🇨🇭 Switzerland", Doug: "🇲🇦 Morocco", Eric: "🇨🇴 Colombia", Con: "🇲🇽 Mexico", Pink: "🇧🇷 Brazil", Tyler: "🇨🇦 Canada" };
+// Draft order per round - traded picks baked in silently
+// If someone traded their pick, their slot shows the receiver's name
+const DRAFT_ORDER = {
+    // FINAL 2026 ORDER — locked Jul 19 after Spain 1-0 Argentina in the final.
+    // 1 Tim (ESP, champs) 2 Jake (ARG) 3 Alec (ENG, 3rd) 4 Bruno (FRA) 5 Roy (BEL)
+    // 6 Trey (NOR) 7 Nate (SUI) 8 Doug (MAR) 9 Eric (COL) 10 Con (MEX) 11 Pink (BRA) 12 Tyler (CAN)
+    // Trades baked in: Roy gets Bruno's R2 + Con's R7; Tim gets Bruno's R3 + Eric's R6;
+    // Con gets Roy's R3; Nate gets Trey's R6. R15-16 = makeup rounds (fill to 14 drafted).
+    1: ["Tim", "Jake", "Alec", "Bruno", "Roy", "Trey", "Nate", "Doug", "Eric", "Con", "Pink", "Tyler"],
+    2: ["Tyler", "Pink", "Con", "Eric", "Doug", "Nate", "Trey", "Roy", "Roy", "Alec", "Jake", "Tim"],
+    3: ["Tim", "Jake", "Alec", "Tim", "Con", "Trey", "Nate", "Doug", "Eric", "Con", "Pink", "Tyler"],
+    4: ["Tyler", "Pink", "Con", "Eric", "Doug", "Nate", "Trey", "Roy", "Bruno", "Alec", "Jake", "Tim"],
+    5: ["Tim", "Jake", "Alec", "Bruno", "Roy", "Trey", "Nate", "Doug", "Eric", "Con", "Pink", "Tyler"],
+    6: ["Tyler", "Pink", "Con", "Tim", "Doug", "Nate", "Nate", "Roy", "Bruno", "Alec", "Jake", "Tim"],
+    7: ["Tim", "Jake", "Alec", "Bruno", "Roy", "Trey", "Nate", "Doug", "Eric", "Roy", "Pink", "Tyler"],
+    8: ["Tyler", "Pink", "Con", "Eric", "Doug", "Nate", "Trey", "Roy", "Bruno", "Alec", "Jake", "Tim"],
+    9: ["Tim", "Jake", "Alec", "Bruno", "Roy", "Trey", "Nate", "Doug", "Eric", "Con", "Pink", "Tyler"],
+    10: ["Tyler", "Pink", "Con", "Eric", "Doug", "Nate", "Trey", "Roy", "Bruno", "Alec", "Jake", "Tim"],
+    11: ["Tim", "Jake", "Alec", "Bruno", "Roy", "Trey", "Nate", "Doug", "Eric", "Con", "Pink", "Tyler"],
+    12: ["Tyler", "Pink", "Con", "Eric", "Doug", "Nate", "Trey", "Roy", "Bruno", "Alec", "Jake", "Tim"],
+    13: ["Tim", "Jake", "Alec", "Bruno", "Roy", "Trey", "Nate", "Doug", "Eric", "Con", "Pink", "Tyler"],
+    14: ["Tyler", "Pink", "Con", "Eric", "Doug", "Nate", "Trey", "Roy", "Bruno", "Alec", "Jake", "Tim"],
+    // Makeup rounds: pick-deficient managers fill to 14, in draft-order sequence
+    15: ["Bruno", "Trey", "Eric"],
+    16: ["Bruno"],
+};
+const KEEPERS = [
+    { manager: "Jake", type: "Vet", name: "George Pickens", pos: "WR", team: "DAL" },
+    { manager: "Jake", type: "Rookie", name: "Cam Skattebo", pos: "RB", team: "NYG" },
+    { manager: "Bruno", type: "Vet", name: "Ja'Marr Chase", pos: "WR", team: "CIN" },
+    { manager: "Bruno", type: "Rookie", name: "Tyler Warren", pos: "TE", team: "IND" },
+    { manager: "Pink", type: "Vet", name: "Josh Allen", pos: "QB", team: "BUF" },
+    { manager: "Pink", type: "Rookie", name: "T. Henderson", pos: "RB", team: "NE" },
+    { manager: "Tim", type: "Vet", name: "Malik Nabers", pos: "WR", team: "NYG" },
+    { manager: "Tim", type: "Rookie", name: "Omarion Hampton", pos: "RB", team: "LAC" },
+    { manager: "Trey", type: "Vet", name: "CeeDee Lamb", pos: "WR", team: "DAL" },
+    { manager: "Trey", type: "Rookie", name: "Kaleb Johnson", pos: "RB", team: "PIT" },
+    { manager: "Roy", type: "Vet", name: "Travis Etienne", pos: "RB", team: "NO" },
+    { manager: "Roy", type: "Rookie", name: "RJ Harvey", pos: "RB", team: "DEN" },
+    { manager: "Doug", type: "Vet", name: "Brock Bowers", pos: "TE", team: "LV" },
+    { manager: "Doug", type: "Rookie", name: "Jaydon Blue", pos: "RB", team: "DAL" },
+    { manager: "Alec", type: "Vet", name: "Ashton Jeanty", pos: "RB", team: "LV" },
+    { manager: "Alec", type: "Rookie", name: "Emeka Egbuka", pos: "WR", team: "TB" },
+    { manager: "Con", type: "Vet", name: "Amon-Ra St. Brown", pos: "WR", team: "DET" },
+    { manager: "Con", type: "Rookie", name: "Kyle Monangai", pos: "RB", team: "CHI" },
+    { manager: "Eric", type: "Vet", name: "Derrick Henry", pos: "RB", team: "BAL" },
+    { manager: "Eric", type: "Rookie", name: "Quinshon Judkins", pos: "RB", team: "CLE" },
+    { manager: "Nate", type: "Vet", name: "De'Von Achane", pos: "RB", team: "MIA" },
+    { manager: "Nate", type: "Rookie", name: "Harold Fannin Jr.", pos: "TE", team: "CLE" },
+    { manager: "Tyler", type: "Vet", name: "Saquon Barkley", pos: "RB", team: "PHI" },
+    { manager: "Tyler", type: "Rookie", name: "Tetairoa McMillan", pos: "WR", team: "CAR" },
+];
+// Keeper quality: how good is each manager's kept player at that position?
+// elite = don't need to draft that pos early, solid = decent, unproven = still need help
+const KEEPER_QUALITY = {
+    "George Pickens": "solid", "Cam Skattebo": "unproven",
+    "Ja'Marr Chase": "elite", "Tyler Warren": "solid",
+    "Josh Allen": "elite", "T. Henderson": "unproven",
+    "Malik Nabers": "elite", "Omarion Hampton": "solid",
+    "CeeDee Lamb": "elite", "Kaleb Johnson": "unproven",
+    "Travis Etienne": "solid", "RJ Harvey": "unproven",
+    "Brock Bowers": "elite", "Jaydon Blue": "unproven",
+    "Ashton Jeanty": "elite", "Emeka Egbuka": "solid",
+    "Amon-Ra St. Brown": "elite", "Kyle Monangai": "unproven",
+    "Derrick Henry": "elite", "Quinshon Judkins": "solid",
+    "De'Von Achane": "elite", "Harold Fannin Jr.": "unproven",
+    "Saquon Barkley": "elite", "Tetairoa McMillan": "solid",
+};
+// 2026 TRUE ROOKIES - get the keeper premium (drafted now, keepable for a 3-year window:
+// rookie keeper next year, vet keeper year after). Tiered by how early BBFL history +
+// expert consensus says they go. 4-year board history: the top rookie RB ALWAYS goes Round 1
+// (Najee 2021, Hall 2022, Bijan 2023, Nabers 2024, Jeanty 2025 -> Love 2026).
+const ROOKIE_TIER = {
+    // TIER 1: lock Round 1, mid-first at latest. RB1 of the class, forced top-8 overall.
+    "Jeremiyah Love": 1,
+    // TIER 2: strong bump (~1.5-2 rounds earlier). Immediate-impact / high draft capital 2026 rookies.
+    "Carnell Tate": 2,
+    "Jordyn Tyson": 2,
+    "Makai Lemon": 2,
+    "Jadarian Price": 2,
+    "KC Concepcion": 2,
+    "Fernando Mendoza": 2,
+    "Kenyon Sadiq": 2,
+    // TIER 3: modest bump (~1 round). Upside fliers, one-injury-away backs, WRs with a path.
+    "Denzel Boston": 3,
+    "Antonio Williams": 3,
+    "Omar Cooper Jr.": 3,
+    "Chris Brazzell II": 3,
+    "Emmett Johnson": 3,
+    "Mike Washington Jr.": 3,
+    "Jonah Coleman": 3,
+    "Kaytron Allen": 3,
+    "Nicholas Singleton": 3,
+    "Eli Stowers": 3,
+    "Chris Bell": 3,
+    "Malachi Fields": 3,
+    "Kaelon Black": 3,
+    "Seth McGowan": 3,
+    "Ty Simpson": 3,
+    "Brenen Thompson": 3,
+    "De'Zhaun Stribling": 3,
+    "Germie Bernard": 3,
+};
+const ROOKIES = new Set(Object.keys(ROOKIE_TIER));
+// How much to improve a rookie's effective draft rank (lower = drafted earlier).
+// Tier 1 gets forced to a top-8 overall value; others get a fixed bump.
+function rookieEffectiveRank(name, rawRank, alreadyHasRookie) {
+    const tier = ROOKIE_TIER[name];
+    if (!tier)
+        return rawRank;
+    // You only get to KEEP one rookie, so the reach is worth it exactly once. After a
+    // manager has stashed his guy, the premium nearly vanishes and he goes back to best
+    // available — nobody burns a second premium pick on an asset he can't keep.
+    if (tier === 1) {
+        // The crown-jewel rookie is a Round 1 talent either way; the keeper angle just
+        // decides whether he goes top-5 or late first.
+        return alreadyHasRookie ? 10 : 5;
+    }
+    if (tier === 2) {
+        return alreadyHasRookie ? Math.max(rawRank - 4, 24) : Math.max(rawRank - 22, 18);
+    }
+    return alreadyHasRookie ? rawRank : Math.max(rawRank - 12, 30);
+}
+const PLAYERS = [
+    { name: "Jahmyr Gibbs", pos: "RB", team: "DET", rank: 1 },
+    { name: "Bijan Robinson", pos: "RB", team: "ATL", rank: 2 },
+    { name: "Puka Nacua", pos: "WR", team: "LAR", rank: 3 },
+    { name: "JSN", pos: "WR", team: "SEA", rank: 4 },
+    { name: "Christian McCaffrey", pos: "RB", team: "SF", rank: 5 },
+    { name: "Jonathan Taylor", pos: "RB", team: "IND", rank: 6 },
+    { name: "Drake London", pos: "WR", team: "ATL", rank: 7 },
+    { name: "Rashee Rice", pos: "WR", team: "KC", rank: 8 },
+    { name: "James Cook", pos: "RB", team: "BUF", rank: 9 },
+    { name: "Justin Jefferson", pos: "WR", team: "MIN", rank: 10 },
+    { name: "Chase Brown", pos: "RB", team: "CIN", rank: 11 },
+    { name: "AJ Brown", pos: "WR", team: "NE", rank: 12 },
+    { name: "Josh Jacobs", pos: "RB", team: "GB", rank: 13 },
+    { name: "Chris Olave", pos: "WR", team: "NO", rank: 14 },
+    { name: "Nico Collins", pos: "WR", team: "HOU", rank: 15 },
+    { name: "Zay Flowers", pos: "WR", team: "BAL", rank: 16 },
+    { name: "Breece Hall", pos: "RB", team: "NYJ", rank: 17 },
+    { name: "Jeremiyah Love", pos: "RB", team: "ARI", rank: 18 },
+    { name: "Kenneth Walker", pos: "RB", team: "KC", rank: 19 },
+    { name: "Garrett Wilson", pos: "WR", team: "NYJ", rank: 20 },
+    { name: "Kyren Williams", pos: "RB", team: "LAR", rank: 21 },
+    { name: "DeVonta Smith", pos: "WR", team: "PHI", rank: 22 },
+    { name: "Trey McBride", pos: "TE", team: "ARI", rank: 23 },
+    { name: "Javonte Williams", pos: "RB", team: "DAL", rank: 24 },
+    { name: "Tee Higgins", pos: "WR", team: "CIN", rank: 25 },
+    { name: "Davante Adams", pos: "WR", team: "LAR", rank: 26 },
+    { name: "Jameson Williams", pos: "WR", team: "DET", rank: 27 },
+    { name: "Terry McLaurin", pos: "WR", team: "WSH", rank: 28 },
+    { name: "Rome Odunze", pos: "WR", team: "CHI", rank: 29 },
+    { name: "Alec Pierce", pos: "WR", team: "IND", rank: 30 },
+    { name: "Bucky Irving", pos: "RB", team: "TB", rank: 31 },
+    { name: "D'Andre Swift", pos: "RB", team: "CHI", rank: 32 },
+    { name: "DJ Moore", pos: "WR", team: "BUF", rank: 33 },
+    { name: "Ladd McConkey", pos: "WR", team: "LAC", rank: 34 },
+    { name: "Jaylen Waddle", pos: "WR", team: "DEN", rank: 35 },
+    { name: "Luther Burden III", pos: "WR", team: "CHI", rank: 36 },
+    { name: "Courtland Sutton", pos: "WR", team: "DEN", rank: 37 },
+    { name: "Bhayshul Tuten", pos: "RB", team: "JAX", rank: 38 },
+    { name: "Mike Evans", pos: "WR", team: "SF", rank: 39 },
+    { name: "MHJ", pos: "WR", team: "ARI", rank: 40 },
+    { name: "DK Metcalf", pos: "WR", team: "PIT", rank: 41 },
+    { name: "Christian Watson", pos: "WR", team: "GB", rank: 42 },
+    { name: "Drake Maye", pos: "QB", team: "NE", rank: 43 },
+    { name: "Jakobi Meyers", pos: "WR", team: "JAX", rank: 44 },
+    { name: "Parker Washington", pos: "WR", team: "JAX", rank: 45 },
+    { name: "Carnell Tate", pos: "WR", team: "TEN", rank: 46 },
+    { name: "Colston Loveland", pos: "TE", team: "CHI", rank: 47 },
+    { name: "Lamar Jackson", pos: "QB", team: "BAL", rank: 48 },
+    { name: "Jadarian Price", pos: "RB", team: "SEA", rank: 49 },
+    { name: "Michael Pittman Jr.", pos: "WR", team: "PIT", rank: 50 },
+    { name: "Tony Pollard", pos: "RB", team: "TEN", rank: 51 },
+    { name: "Brian Thomas Jr.", pos: "WR", team: "JAX", rank: 52 },
+    { name: "Wan'Dale Robinson", pos: "WR", team: "TEN", rank: 53 },
+    { name: "David Montgomery", pos: "RB", team: "HOU", rank: 54 },
+    { name: "Joe Burrow", pos: "QB", team: "CIN", rank: 55 },
+    { name: "Quentin Johnston", pos: "WR", team: "LAC", rank: 56 },
+    { name: "Jordyn Tyson", pos: "WR", team: "NO", rank: 57 },
+    { name: "Deebo Samuel", pos: "WR", team: "FA", rank: 58 },
+    { name: "Jayden Reed", pos: "WR", team: "GB", rank: 59 },
+    { name: "Rico Dowdle", pos: "RB", team: "PIT", rank: 60 },
+    { name: "Rhamondre Stevenson", pos: "RB", team: "NE", rank: 61 },
+    { name: "Jordan Addison", pos: "WR", team: "MIN", rank: 62 },
+    { name: "Chris Godwin Jr.", pos: "WR", team: "TB", rank: 63 },
+    { name: "Jaylen Warren", pos: "RB", team: "PIT", rank: 64 },
+    { name: "Michael Wilson", pos: "WR", team: "ARI", rank: 65 },
+    { name: "Chuba Hubbard", pos: "RB", team: "CAR", rank: 66 },
+    { name: "Dak Prescott", pos: "QB", team: "DAL", rank: 67 },
+    { name: "Xavier Worthy", pos: "WR", team: "KC", rank: 68 },
+    { name: "Jayden Daniels", pos: "QB", team: "WSH", rank: 69 },
+    { name: "Jalen Hurts", pos: "QB", team: "PHI", rank: 70 },
+    { name: "Brock Purdy", pos: "QB", team: "SF", rank: 71 },
+    { name: "Khalil Shakir", pos: "WR", team: "BUF", rank: 72 },
+    { name: "Josh Downs", pos: "WR", team: "IND", rank: 73 },
+    { name: "Makai Lemon", pos: "WR", team: "PHI", rank: 74 },
+    { name: "Romeo Doubs", pos: "WR", team: "NE", rank: 75 },
+    { name: "Matthew Stafford", pos: "QB", team: "LAR", rank: 76 },
+    { name: "Rashid Shaheed", pos: "WR", team: "SEA", rank: 77 },
+    { name: "JK Dobbins", pos: "RB", team: "DEN", rank: 78 },
+    { name: "John Metchie III", pos: "WR", team: "CAR", rank: 79 },
+    { name: "Matthew Golden", pos: "WR", team: "GB", rank: 80 },
+    { name: "Calvin Ridley", pos: "WR", team: "TEN", rank: 81 },
+    { name: "Trevor Lawrence", pos: "QB", team: "JAX", rank: 82 },
+    { name: "Aaron Jones", pos: "RB", team: "MIN", rank: 83 },
+    { name: "Jalen Coker", pos: "WR", team: "CAR", rank: 84 },
+    { name: "Patrick Mahomes", pos: "QB", team: "KC", rank: 85 },
+    { name: "Jaxson Dart", pos: "QB", team: "NYG", rank: 86 },
+    { name: "Theo Wease Jr.", pos: "WR", team: "MIA", rank: 87 },
+    { name: "Jared Goff", pos: "QB", team: "DET", rank: 88 },
+    { name: "Caleb Williams", pos: "QB", team: "CHI", rank: 89 },
+    { name: "Tucker Kraft", pos: "TE", team: "GB", rank: 90 },
+    { name: "Justin Herbert", pos: "QB", team: "LAC", rank: 91 },
+    { name: "KC Concepcion", pos: "WR", team: "CLE", rank: 92 },
+    { name: "Jerry Jeudy", pos: "WR", team: "CLE", rank: 93 },
+    { name: "Rachaad White", pos: "RB", team: "WSH", rank: 94 },
+    { name: "Tre Tucker", pos: "WR", team: "LV", rank: 95 },
+    { name: "Kenny Gainwell", pos: "RB", team: "TB", rank: 96 },
+    { name: "Rashod Bateman", pos: "WR", team: "BAL", rank: 97 },
+    { name: "Bo Nix", pos: "QB", team: "DEN", rank: 98 },
+    { name: "George Kittle", pos: "TE", team: "SF", rank: 99 },
+    { name: "Jayden Higgins", pos: "WR", team: "HOU", rank: 100 },
+    { name: "JCM", pos: "RB", team: "WSH", rank: 101 },
+    { name: "Jauan Jennings", pos: "WR", team: "MIN", rank: 102 },
+    { name: "Sam LaPorta", pos: "TE", team: "DET", rank: 103 },
+    { name: "Jalen McMillan", pos: "WR", team: "TB", rank: 104 },
+    { name: "Jake Ferguson", pos: "TE", team: "DAL", rank: 105 },
+    { name: "Mark Andrews", pos: "TE", team: "BAL", rank: 106 },
+    { name: "Travis Hunter", pos: "WR", team: "JAX", rank: 107 },
+    { name: "Jordan Mason", pos: "RB", team: "MIN", rank: 108 },
+    { name: "Woody Marks", pos: "RB", team: "HOU", rank: 109 },
+    { name: "Germie Bernard", pos: "WR", team: "PIT", rank: 110 },
+    { name: "Alvin Kamara", pos: "RB", team: "NO", rank: 111 },
+    { name: "Aaron Rodgers", pos: "QB", team: "PIT", rank: 112 },
+    { name: "Dalton Kincaid", pos: "TE", team: "BUF", rank: 113 },
+    { name: "Zach Charbonnet", pos: "RB", team: "SEA", rank: 114 },
+    { name: "Oronde Gadsden", pos: "TE", team: "LAC", rank: 115 },
+    { name: "Kyle Pitts", pos: "TE", team: "ATL", rank: 116 },
+    { name: "Ray Davis", pos: "RB", team: "BUF", rank: 117 },
+    { name: "Tyreek Hill", pos: "WR", team: "FA", rank: 118 },
+    { name: "Trey Benson", pos: "RB", team: "ARI", rank: 119 },
+    { name: "Tyler Shough", pos: "QB", team: "NO", rank: 120 },
+    { name: "Chris Bell", pos: "WR", team: "MIA", rank: 121 },
+    { name: "Braelon Allen", pos: "RB", team: "NYJ", rank: 122 },
+    { name: "Denzel Boston", pos: "WR", team: "CLE", rank: 123 },
+    { name: "Dallas Goedert", pos: "TE", team: "PHI", rank: 124 },
+    { name: "Hunter Henry", pos: "TE", team: "NE", rank: 125 },
+    { name: "Keon Coleman", pos: "WR", team: "BUF", rank: 126 },
+    { name: "Tyler Allgeier", pos: "RB", team: "ARI", rank: 127 },
+    { name: "Ty Simpson", pos: "QB", team: "LAR", rank: 128 },
+    { name: "Baker Mayfield", pos: "QB", team: "TB", rank: 129 },
+    { name: "Tyler Goodson", pos: "RB", team: "IND", rank: 130 },
+    { name: "Bryce Young", pos: "QB", team: "CAR", rank: 131 },
+    { name: "Fernando Mendoza", pos: "QB", team: "LV", rank: 132 },
+    { name: "Marvin Mims Jr.", pos: "WR", team: "DEN", rank: 133 },
+    { name: "Seth McGowan", pos: "RB", team: "FA", rank: 134 },
+    { name: "Travis Kelce", pos: "TE", team: "KC", rank: 135 },
+    { name: "Stefon Diggs", pos: "WR", team: "FA", rank: 136 },
+    { name: "Isiah Pacheco", pos: "RB", team: "DET", rank: 137 },
+    { name: "Jerome Ford", pos: "RB", team: "WSH", rank: 138 },
+    { name: "Sean Tucker", pos: "RB", team: "TB", rank: 139 },
+    { name: "Brenen Thompson", pos: "WR", team: "LAC", rank: 140 },
+    { name: "Dylan Sampson", pos: "RB", team: "CLE", rank: 141 },
+    { name: "Isaiah Likely", pos: "TE", team: "NYG", rank: 142 },
+    { name: "Cam Ward", pos: "QB", team: "TEN", rank: 143 },
+    { name: "Emmett Johnson", pos: "RB", team: "KC", rank: 144 },
+    { name: "Blake Corum", pos: "RB", team: "LAR", rank: 145 },
+    { name: "Kaelon Black", pos: "RB", team: "SF", rank: 146 },
+    { name: "Tim Patrick", pos: "WR", team: "DET", rank: 147 },
+    { name: "Eli Stowers", pos: "TE", team: "PHI", rank: 148 },
+    { name: "Keaton Mitchell", pos: "RB", team: "LAC", rank: 149 },
+    { name: "Malachi Fields", pos: "WR", team: "NYG", rank: 150 },
+    { name: "Sam Darnold", pos: "QB", team: "SEA", rank: 151 },
+    { name: "Jaleel McLaughlin", pos: "RB", team: "DEN", rank: 152 },
+    { name: "Kaytron Allen", pos: "RB", team: "WSH", rank: 153 },
+    { name: "Kirk Cousins", pos: "QB", team: "LV", rank: 154 },
+    { name: "Chris Brazzell II", pos: "WR", team: "CAR", rank: 155 },
+    { name: "Kenyon Sadiq", pos: "TE", team: "NYJ", rank: 156 },
+    { name: "Tyrone Tracy", pos: "RB", team: "NYG", rank: 157 },
+    { name: "Xavier Legette", pos: "WR", team: "CAR", rank: 158 },
+    { name: "Daniel Jones", pos: "QB", team: "IND", rank: 159 },
+    { name: "Jonah Coleman", pos: "RB", team: "DEN", rank: 160 },
+    { name: "MarShawn Lloyd", pos: "RB", team: "GB", rank: 161 },
+    { name: "Tank Bigsby", pos: "RB", team: "PHI", rank: 162 },
+    { name: "Brian Robinson Jr.", pos: "RB", team: "ATL", rank: 163 },
+    { name: "Nicholas Singleton", pos: "RB", team: "TEN", rank: 164 },
+    { name: "Roman Wilson", pos: "WR", team: "PIT", rank: 165 },
+    { name: "Jordan Love", pos: "QB", team: "GB", rank: 166 },
+    { name: "Ja'Lynn Polk", pos: "WR", team: "NE", rank: 167 },
+    { name: "Troy Franklin", pos: "WR", team: "DEN", rank: 168 },
+    { name: "Mike Washington Jr.", pos: "RB", team: "LV", rank: 169 },
+    { name: "Chris Rodriguez Jr.", pos: "RB", team: "JAX", rank: 170 },
+    { name: "Christian Kirk", pos: "WR", team: "SF", rank: 171 },
+    { name: "Jonathon Brooks", pos: "RB", team: "CAR", rank: 172 },
+    { name: "Malik Washington", pos: "WR", team: "MIA", rank: 173 },
+    { name: "Dontayvion Wicks", pos: "WR", team: "PHI", rank: 174 },
+    { name: "De'Zhaun Stribling", pos: "WR", team: "SF", rank: 175 },
+    { name: "Tyjae Spears", pos: "RB", team: "TEN", rank: 176 },
+    { name: "Adam Thielen", pos: "WR", team: "CAR", rank: 177 },
+    { name: "CJ Stroud", pos: "QB", team: "HOU", rank: 178 },
+    { name: "Demarcus Robinson", pos: "WR", team: "SF", rank: 179 },
+    { name: "Cedric Tillman", pos: "WR", team: "CLE", rank: 180 },
+    { name: "Brandon Aiyuk", pos: "WR", team: "SF", rank: 181 },
+    { name: "Isaac Guerendo", pos: "RB", team: "SF", rank: 182 },
+    { name: "Omar Cooper Jr.", pos: "WR", team: "NYJ", rank: 183 },
+    { name: "Elic Ayomanor", pos: "WR", team: "TEN", rank: 184 },
+    { name: "Emanuel Wilson", pos: "RB", team: "SEA", rank: 185 },
+    { name: "Antonio Williams", pos: "WR", team: "WSH", rank: 186 },
+    { name: "Antonio Gibson", pos: "RB", team: "NE", rank: 187 },
+    { name: "Devin Neal", pos: "RB", team: "NO", rank: 188 },
+    { name: "Kyler Murray", pos: "QB", team: "MIN", rank: 189 },
+    { name: "Kimani Vidal", pos: "RB", team: "LAC", rank: 190 },
+    { name: "Will Shipley", pos: "RB", team: "PHI", rank: 191 },
+    { name: "Jordan James", pos: "RB", team: "SF", rank: 192 },
+    { name: "DJ Giddens", pos: "RB", team: "IND", rank: 193 },
+    { name: "Ollie Gordon II", pos: "RB", team: "MIA", rank: 194 },
+];
+// Roster: 2 keepers + 14 drafted = 16 total spots.
+// Position limits are the TOTAL allowed at each spot (keepers + drafted count toward these).
+// Sum = 16 so the position caps never block a team from reaching 14 drafted picks.
+const ROSTER_LIMITS = { QB: 2, RB: 8, WR: 8, TE: 2 };
+const TOTAL_ROSTER = 14; // drafted spots each team fills (before traded-pick adjustments)
+// Twelve colours spaced around the wheel and checked for perceptual distance, so no
+// two managers look alike on a phone. Minimum separation is ~31 ΔE (the old set had a
+// pair at 6, which is effectively identical).
+const MGR_COLORS = {
+    Jake: "#ef4444", Bruno: "#fb923c", Pink: "#f472b6", Tim: "#facc15",
+    Trey: "#a3e635", Roy: "#22c55e", Doug: "#2dd4bf", Alec: "#818cf8",
+    Con: "#a855f7", Eric: "#f8fafc", Nate: "#a8a29e", Tyler: "#38bdf8"
+};
+// Display names: full names or well-known nicknames so everyone recognizes the pick.
+// The pool stores some as abbreviations (JSN, MHJ, JCM) — map those to what the league says.
+const DISPLAY_NAMES = {
+    "JSN": "JSN", // everyone knows JSN
+    "MHJ": "MHJ", // Marvin Harrison Jr.
+    "JCM": "JCM", // Jacory Croskey-Merritt
+    "Jonathan Taylor": "Jonathan Taylor",
+    "Justin Jefferson": "Justin Jefferson",
+    "Amon-Ra St. Brown": "ARSB", // league shorthand
+    "Christian McCaffrey": "CMC",
+    "Brian Thomas Jr.": "BTJ",
+    "Tetairoa McMillan": "T. McMillan",
+    "Jeremiyah Love": "Jeremiyah Love",
+};
+function displayName(name) {
+    return DISPLAY_NAMES[name] || name;
+}
+const POS_STYLE = (pos) => {
+    if (pos === "RB")
+        return { background: "#052e16", color: "#4ade80", border: "1px solid #14532d" };
+    if (pos === "WR")
+        return { background: "#0c2340", color: "#60a5fa", border: "1px solid #1e3a5f" };
+    if (pos === "QB")
+        return { background: "#2d1f4f", color: "#c4b5fd", border: "1px solid #4c1d95" };
+    if (pos === "TE")
+        return { background: "#451a03", color: "#fbbf24", border: "1px solid #78350f" };
+    return {};
+};
+function getKeeperQuality(manager, pos) {
+    // Returns best keeper quality this manager has at a position: elite/solid/unproven/none
+    const kept = KEEPERS.filter(k => k.manager === manager && k.pos === pos);
+    if (kept.length === 0)
+        return "none";
+    const qualities = kept.map(k => KEEPER_QUALITY[k.name] || "unproven");
+    if (qualities.includes("elite"))
+        return "elite";
+    if (qualities.includes("solid"))
+        return "solid";
+    return "unproven";
+}
+function hasRookieKeeperSlotFilled(manager, picks) {
+    // Has this manager already drafted a rookie (future keeper asset)?
+    return picks.some(p => p.manager === manager && ROOKIES.has(p.player.name));
+}
+function lastTwoPicksPos(manager, picks) {
+    const mine = picks.filter(p => p.manager === manager);
+    return mine.slice(-2).map(p => p.player.pos);
+}
+// Build an ESPN-style lineup for a manager: 1 QB, 2 RB, 3 WR, 1 TE, 1 FLEX, then Bench
+// Best players start regardless of keeper status. Keepers use their real rank/value,
+// so a weak keeper (e.g. an unproven rookie) correctly lands on the bench.
+const LINEUP_SLOTS = ["QB", "RB", "RB", "WR", "WR", "WR", "TE", "FLEX"];
+// Estimate a keeper's rank from the player pool if present, else from keeper quality tier
+// Keepers sit outside the draft pool, so they carry their own consensus values.
+// Without these they'd have no positional rank and every keeper would show as a FLIER.
+const KEEPER_RANKS = {
+    "Ja'Marr Chase": 4, "Amon-Ra St. Brown": 8, "De'Von Achane": 9,
+    "Derrick Henry": 11, "CeeDee Lamb": 14, "Ashton Jeanty": 16,
+    "Saquon Barkley": 18, "George Pickens": 20, "Brock Bowers": 21,
+    "Omarion Hampton": 24, "Josh Allen": 30, "Cam Skattebo": 32,
+    "Emeka Egbuka": 34, "Tetairoa McMillan": 35, "Malik Nabers": 36,
+    "Travis Etienne": 41, "Quinshon Judkins": 52, "TreVeyon Henderson": 61,
+    "Tyler Warren": 68, "Harold Fannin Jr.": 79, "RJ Harvey": 103,
+    "Kyle Monangai": 121, "Kaleb Johnson": 140, "Jaydon Blue": 150,
+};
+function keeperRank(name, pos) {
+    const inPool = PLAYERS.find(p => p.name === name);
+    if (inPool)
+        return inPool.rank;
+    if (KEEPER_RANKS[name] != null)
+        return KEEPER_RANKS[name];
+    const q = KEEPER_QUALITY[name];
+    if (q === "elite")
+        return 8;
+    if (q === "solid")
+        return 35;
+    return 80; // unproven
+}
+// Player value tier label for display
+// Positional depth chart for every player, computed once at load.
+// Built from the draft pool AND the keepers — a kept player still has a real place
+// on his position's depth chart, and the tier badge needs to reflect that.
+const POS_RANK = {};
+{
+    const everyone = [
+        ...PLAYERS,
+        ...KEEPERS.map(k => ({ name: k.name, pos: k.pos, rank: keeperRank(k.name, k.pos) })),
+    ];
+    const seen = new Set();
+    ["QB", "RB", "WR", "TE"].forEach(pos => {
+        everyone.filter(p => p.pos === pos && !seen.has(p.name) && (seen.add(p.name) || true))
+            .sort((a, b) => a.rank - b.rank)
+            .forEach((p, i) => { POS_RANK[p.name] = i + 1; });
+    });
+}
+// A player's tier has to be judged against HIS OWN position, not the overall board.
+// The TE4 is a weekly starter even though his overall rank sits near WR40 — because a
+// league starts ~12 tight ends and ~40 receivers. Thresholds below are roughly
+// "how many of this position does a 12-team league actually start each week".
+// Tiers are judged against a player's OWN position and use the language fantasy players
+// already speak: "he's a high-end RB2" says far more than "good". Bands are sized to how
+// many of each position a 12-team league actually starts, so the same overall rank means
+// different things at RB and TE — which is the whole point.
+const TIER_BANDS = {
+    RB: [5, 12, 20, 30, 42, 58],
+    WR: [6, 15, 24, 36, 50, 70],
+    TE: [2, 6, 12, 18, 24, 32],
+    QB: [3, 8, 14, 20, 26, 32],
+};
+const TIER_COLORS = ["#c084fc", "#34d399", "#38bdf8", "#fbbf24", "#fb923c", "#9ca3af", "#6b7280"];
+function tierLabelFor(pos, idx) {
+    // 0 elite · 1 the position's #1 · 2 his #2 · 3 his #3 · 4 flex-worthy · 5 bench · 6 dart
+    if (idx === 0)
+        return "ELITE";
+    if (idx <= 3)
+        return pos + idx; // RB1 / WR2 / TE3 ...
+    if (idx === 4)
+        return pos === "QB" ? "STREAM" : "FLEX";
+    if (idx === 5)
+        return "DEPTH";
+    return "FLIER";
+}
+function valueTier(rank, pos, name) {
+    const bands = TIER_BANDS[pos];
+    if (!bands) {
+        const i = rank <= 24 ? 1 : rank <= 90 ? 3 : 5;
+        return { label: tierLabelFor(pos || "", i), color: TIER_COLORS[i] };
+    }
+    const pr = POS_RANK[name] != null ? POS_RANK[name] : 999;
+    let idx = bands.length;
+    for (let i = 0; i < bands.length; i++) {
+        if (pr <= bands[i]) {
+            idx = i;
+            break;
+        }
+    }
+    return { label: tierLabelFor(pos, idx), color: TIER_COLORS[idx] };
+}
+// Overall tier (across all positions) based on rank break points.
+const OVERALL_TIER_BREAKS = [6, 12, 24, 40, 60, 85, 115, 150];
+function overallTier(rank) {
+    for (let i = 0; i < OVERALL_TIER_BREAKS.length; i++) {
+        if (rank <= OVERALL_TIER_BREAKS[i])
+            return i + 1;
+    }
+    return OVERALL_TIER_BREAKS.length + 1;
+}
+// Positional tiers: compute per-position tier numbers from the pool by finding natural
+// rank gaps. Cached once. A tier is a cluster of players; a big rank gap = new tier.
+let _posTierCache = null;
+function getPositionalTiers() {
+    if (_posTierCache)
+        return _posTierCache;
+    const byPos = { QB: [], RB: [], WR: [], TE: [] };
+    PLAYERS.forEach(p => { if (byPos[p.pos])
+        byPos[p.pos].push(p); });
+    const map = {}; // name -> positional tier number
+    Object.keys(byPos).forEach(pos => {
+        const sorted = [...byPos[pos]].sort((a, b) => a.rank - b.rank);
+        let tier = 1;
+        for (let i = 0; i < sorted.length; i++) {
+            if (i > 0) {
+                const gap = sorted[i].rank - sorted[i - 1].rank;
+                // a gap of 7+ overall-rank spots signals a new positional tier (tighter = more tiers)
+                if (gap >= 7)
+                    tier++;
+            }
+            map[sorted[i].name] = tier;
+        }
+    });
+    _posTierCache = map;
+    return map;
+}
+function positionalTier(name) {
+    return getPositionalTiers()[name] || 1;
+}
+function buildLineup(manager, picks) {
+    const keeperPlayers = KEEPERS.filter(k => k.manager === manager).map(k => ({
+        name: k.name, pos: k.pos, team: k.team, rank: keeperRank(k.name, k.pos),
+        isKeeper: true, keeperType: k.type
+    }));
+    const draftedPlayers = picks.filter(p => p.manager === manager).map(p => {
+        var _a;
+        return ({
+            name: p.player.name, pos: p.player.pos, team: p.player.team, rank: (_a = p.player.rank) !== null && _a !== void 0 ? _a : 150,
+            isKeeper: false, round: p.round
+        });
+    });
+    const all = [...keeperPlayers, ...draftedPlayers];
+    // Sort purely by real rank — best players start, keeper or not
+    all.sort((a, b) => a.rank - b.rank);
+    const used = new Set();
+    const starters = [];
+    // Fill fixed slots with the best available player at each position
+    for (const slot of LINEUP_SLOTS) {
+        if (slot === "FLEX")
+            continue;
+        const pick = all.find(p => !used.has(p.name) && p.pos === slot);
+        if (pick) {
+            used.add(pick.name);
+            starters.push({ slot, player: pick });
+        }
+        else {
+            starters.push({ slot, player: null });
+        }
+    }
+    // FLEX: best remaining RB/WR/TE by rank
+    const flexPick = all.find(p => !used.has(p.name) && ["RB", "WR", "TE"].includes(p.pos));
+    if (flexPick) {
+        used.add(flexPick.name);
+    }
+    starters.push({ slot: "FLEX", player: flexPick || null });
+    // Bench = everyone not used, still sorted by rank
+    const bench = all.filter(p => !used.has(p.name));
+    return { starters, bench };
+}
+function getRosterCounts(manager, picks) {
+    const keeperCounts = { QB: 0, RB: 0, WR: 0, TE: 0 };
+    KEEPERS.filter(k => k.manager === manager).forEach(k => {
+        if (keeperCounts[k.pos] !== undefined)
+            keeperCounts[k.pos]++;
+    });
+    const draftedCounts = { QB: 0, RB: 0, WR: 0, TE: 0 };
+    picks.filter(p => p.manager === manager).forEach(p => {
+        if (draftedCounts[p.player.pos] !== undefined)
+            draftedCounts[p.player.pos]++;
+    });
+    const total = { QB: 0, RB: 0, WR: 0, TE: 0 };
+    Object.keys(total).forEach(pos => { total[pos] = keeperCounts[pos] + draftedCounts[pos]; });
+    const draftedTotal = picks.filter(p => p.manager === manager).length;
+    return { counts: total, draftedTotal };
+}
+function isRosterFull(manager, picks) {
+    const { counts, draftedTotal } = getRosterCounts(manager, picks);
+    if (draftedTotal >= TOTAL_ROSTER)
+        return true;
+    // Check if all positions are at limit
+    const allFull = Object.keys(ROSTER_LIMITS).every(pos => counts[pos] >= ROSTER_LIMITS[pos]);
+    return allFull;
+}
+function canDraftPos(manager, pos, picks) {
+    const { counts } = getRosterCounts(manager, picks);
+    return counts[pos] < ROSTER_LIMITS[pos];
+}
+// How much each manager "goes off the board" — higher = more gut picks / reaches.
+// Mimics real BBFL tendencies: some managers trust rankings, others trust their gut.
+const MANAGER_CHAOS = {
+    Jake: 0.5, Bruno: 0.9, Pink: 0.4, Tim: 0.3, Trey: 0.7, Roy: 1.0,
+    Doug: 0.6, Alec: 0.5, Con: 1.1, Eric: 0.8, Nate: 0.7, Tyler: 0.6,
+};
+// 2025 final standings (1 = champ) — drives the setup-screen trash talk
+const LAST_STANDINGS = { Bruno: 1, Tyler: 2, Pink: 3, Doug: 4, Eric: 5, Trey: 6, Alec: 7, Jake: 8, Nate: 9, Tim: 10, Roy: 11, Con: 12 };
+const MANAGER_INTRO = {
+    Bruno: "👑 Defending champ — who celebrated by trading away his R2 AND R3. Enjoy those scrap-heap makeup picks at the end of the draft. Bold strategy.",
+    Tyler: "🥈 Runner-up last season… now picking DEAD LAST because Canada lost 0-3. The revenge tour starts at pick 12.",
+    Pink: "🥉 Third place with Josh Allen in your pocket. The window is wide open — do not blow it.",
+    Doug: "4th place. Kept Brock Bowers. Steady, sensible, dangerous. Very commissioner-core.",
+    Eric: "5th last year, and King Henry is not getting younger. Win NOW or start apologizing to Judkins.",
+    Trey: "6th — perfectly, painfully mid. Your gut picks are famous. Your trophies are not.",
+    Alec: "7th place, but England took the bronze and you pick 3rd — AND you are keeping ASHTON JEANTY. No excuses.",
+    Jake: "8th place, but Argentina ran to the final and handed you pick 2. Pickens and Skattebo say the rebuild is over.",
+    Nate: "9th place — but Switzerland won you pick 7, the best draft slot of your ENTIRE career. The curse is broken. Sort of.",
+    Tim: "10th place, so you hoarded picks like a doomsday prepper, SPAIN won you the 1.01, AND Nabers beat the PUP list. The rich get richer. Cook.",
+    Roy: "11th. ELEVENTH. But Belgium dragged you to pick 5 and you own two extra picks. No excuses from the cheap seats.",
+    Con: "💀 Dead last in 2025. Traded your R7 away, kept Monangai, and it literally cannot get worse. Probably.",
+};
+const POS_ACCENT = { QB: "#a78bfa", RB: "#4ade80", WR: "#60a5fa", TE: "#fbbf24" };
+// Player cards: f = 2025 fantasy finish, s = season line, o = outlook (1 up / -1 down / 0 steady),
+// b = the write-up, n = news flag (legal/injury/role — the stuff that moves drafts)
+const PLAYER_CARDS = {
+    "De'Zhaun Stribling": { f: "Rookie", s: "33rd overall pick, 4.36 speed", o: 1, n: "CAMP RISER: Purdy calls him \u201ca baller\u201d — and with Ricky Pearsall lost for the season, his path to snaps just cleared.", b: "6-foot-2 rookie who runs 4.36 and already has his QB's trust. The depth chart opened up in front of him overnight." },
+    "Christian Kirk": { f: "WR47", s: "2025: signed with SF this offseason", o: 0, n: "Managing a calf injury, but Pearsall's season-ending IR moves him up the pecking order.", b: "Slot duty in the Shanahan tree with more targets available than anyone expected in July." },
+    "Malik Nabers": { f: "WR60 (4 games)", s: "2025: on a 1,100-yard pace before the Week 4 ACL", o: 1, n: "AVOIDED THE PUP LIST and practiced with the team — Harbaugh said he \u201clooked good.\u201d Still not doing full practices, and the Giants will NOT commit to Week 1; they are evaluating day-to-day.", b: "Record-breaking rookie, franchise cornerstone, 22 years old. The camp news is a genuine win, but \u201cnot on PUP\u201d is not the same as \u201cWeek 1 starter.\u201d Elite talent, real timeline risk." }, "Bijan Robinson": { f: "RB1 overall", s: "2025: back-to-back top-3 RB seasons, 2,000-scrimmage pace", o: 0, b: "Back in the pool on the vet-keep rule and the consensus 1.01. Bell-cow usage, elite offense, zero questions." },
+    "Jahmyr Gibbs": { f: "RB3", s: "2025: 15+ TD pace, explosive-play king", o: 1, b: "Montgomery is in Houston now — this is Gibbs backfield outright. RB1-overall upside in a top offense." },
+    "Puka Nacua": { f: "WR2", s: "2025: target-hog volume, 130+ looks", o: 0, b: "Stafford trusts him like a security blanket. Floor AND ceiling in one pick." },
+    "JSN": { f: "WR5", s: "2025: Seattle alpha, career-high yards", o: 0, b: "Elite route-winner who owns the Seahawks target tree. As safe as non-Nacua WRs get." },
+    "Jonathan Taylor": { f: "RB5", s: "2025: 1,400+ scrimmage on huge volume", o: 0, b: "Still the engine in Indy, and Daniel Jones checkdowns keep the receiving floor alive." },
+    "Christian McCaffrey": { f: "RB6 (per-game RB2)", s: "2025: elite per-game, missed time again", o: 0, b: "Age and mileage are real, but per-touch he is still top-3. SF retooled the pass game around him with Evans and Kirk." },
+    "Justin Jefferson": { f: "WR3", s: "2025: 1,300+ yards through QB chaos", o: 1, b: "Survived the QB carousel and still finished elite. Kyler Murray arrival is the best QB he has had in years." },
+    "James Cook": { f: "RB4", s: "2025: career year, goal-line locked", o: 0, b: "Buffalo paid him and feeds him. DJ Moore arrival opens boxes even more." },
+    "AJ Brown": { f: "WR6", s: "2025: vintage alpha year in Philly", o: 1, n: "Blockbuster trade to New England pairs him with Drake Maye.", b: "Instant alpha in an ascending offense. Maye is an accuracy upgrade on the deep ball, and Doubs absorbs CB1 shadows." },
+    "Drake London": { f: "WR8", s: "2025: 110+ targets, red-zone monster", o: 1, b: "Tua arrival means accuracy and volume. Contested-catch king with his best QB yet." },
+    "Chase Brown": { f: "RB8", s: "2025: bell-cow in the Cincy shootout machine", o: 0, b: "Every week is a track meet in Cincinnati. Volume plus environment equals weekly RB1 window." },
+    "Lamar Jackson": { f: "QB20 (injured)", s: "2025: missed time, down year", o: 1, b: "The discount year. A healthy Lamar is a top-2 fantasy QB, and you get him in round 2-3 coming off the injury season." },
+    "Trey McBride": { f: "TE1", s: "2025: 100+ catches, target monster", o: 0, b: "The TE cheat code. Jeremiyah Love arrival should soften boxes and keep the middle of the field open." },
+    "Kenneth Walker": { f: "RB7 + SB MVP", s: "2025: Super Bowl MVP run with KC", o: 1, b: "Signed 3yr/$43M and delivered a Super Bowl MVP. Reid designs touches for him — featured back in the best offense alive." },
+    "Nico Collins": { f: "WR4 per-game", s: "2025: elite efficiency, some missed time", o: 0, b: "Stroud alpha with WR1-overall per-game numbers. Health is the only ask." },
+    "Rashee Rice": { f: "WR1-pace (10 gms)", s: "2025: torched defenses after his suspension", o: 0, n: "Jail term served, knee cleanup done. Practicing but on a planned ramp-up — leaving team drills mid-practice for rehab work. Reid: \u201call positive, it was planned.\u201d", b: "Per-route monster in the Mahomes machine, and Mahomes is cleared. The ramp-up is precautionary, not a red flag." }, "Jayden Daniels": { f: "QB2", s: "2025: Konami-code rushing floor", o: 0, b: "The rushing floor makes bad games good and good games nuclear. Weekly QB1 lock." },
+    "Jeremiyah Love": { f: "Rookie", s: "Went 3rd overall to Arizona — highest-drafted RB since Saquon", o: 1, b: "230+ carries waiting behind an offense that funnels RB touches. The crown-jewel rookie keeper — four straight years the top rookie RB went Round 1 in this league." },
+    "DeVonta Smith": { f: "WR14", s: "2025: steady WR2 behind AJB", o: 1, b: "AJ Brown exit leaves 150+ targets behind in Philly. Smith graduates to THE guy with Hurts." },
+    "Jalen Hurts": { f: "QB4", s: "2025: tush-push TDs never stopped", o: 0, b: "Rushing TDs are the cheat code, and his WR1 just became a target monopoly." },
+    "Jaylen Waddle": { f: "WR16", s: "2025: traded to Denver mid-offseason", o: 1, b: "Bo Nix finally weaponizes the deep speed. Payton schemes him open — sneaky WR1-upside pick." },
+    "Zay Flowers": { f: "WR7", s: "2025: career year as Lamar clear No. 1", o: 0, b: "Fresh WR7 finish and no target competition arrived. The connection is real." },
+    "Breece Hall": { f: "RB10", s: "2025: volume king, offense capped him", o: 0, b: "Elite talent, bleak environment. The volume keeps the floor high even when the Jets offense sputters." },
+    "Chris Olave": { f: "WR18", s: "2025: healthy year, chain-mover", o: 0, b: "Contract-year sharpness and Tyson arrival actually keeps defenses honest. Target share is safe." },
+    "Kyren Williams": { f: "RB9", s: "2025: TD-dependent but never benched", o: 0, b: "The Rams simply do not take him off the field. TD regression is the bet either way." },
+    "Javonte Williams": { f: "RB12", s: "2025: quietly RB12 in Dallas", o: 0, b: "Boring, bankable volume in a good offense. The market keeps disrespecting him; the numbers keep showing up." },
+    "Bucky Irving": { f: "RB11", s: "2025: shoulder/foot/knee dings, lead-back talent", o: 1, n: "Offseason shoulder surgery — expected back later this summer, projected to lead the TB backfield.", b: "When healthy he was electric. Gainwell insurance exists, but the lead role is his." },
+    "Colston Loveland": { f: "TE6", s: "2025: rookie flashes with Caleb", o: 1, b: "The DJ Moore trade consolidated Chicago targets. Year-2 TE breakouts are the oldest trend in fantasy — he is the pick." },
+    "Josh Jacobs": { f: "RB13+ (5 of 6 yrs)", s: "2025: another top-13 season in GB", o: -1, n: "Arrested in May on DV charges incl. felony strangulation. No charges filed; DA investigation ongoing. CBA baseline is 6 games IF charged.", b: "Elite talent priced for legal risk. If cleared, this is the steal of the draft. If charged, you burned a mid-rounder." },
+    "DJ Moore": { f: "WR20", s: "2025: traded to Buffalo this offseason", o: 1, b: "Josh Allen first true WR1 since Diggs left. Target ceiling jumps two tiers overnight." },
+    "Jadarian Price": { f: "Rookie", s: "Round-1 capital, class RB2 behind Love", o: 1, b: "Charbonnet tore his ACL in January and is a free agent after 2026 — this backfield belongs to Price by 2027. Committee now, crown later. Prime keeper play." },
+    "Tony Pollard": { f: "RB16", s: "2025: volume-safe in Tennessee", o: 0, b: "Unspectacular floor play. Cam Ward growth would raise everyone here." },
+    "David Montgomery": { f: "RB18", s: "2025: traded to Houston", o: 0, b: "Texans brought him in to hammer between the tackles. TD-heavy profile in a real offense." },
+    "Rome Odunze": { f: "WR22", s: "2025: leap year with Caleb", o: 1, b: "Undisputed Bears WR1 after the Moore trade. Year-3 WR breakout profile with the targets to match." },
+    "Tee Higgins": { f: "WR12", s: "2025: WR1 stretches when Chase drew brackets", o: 0, b: "Perma-WR2 with spike weeks. In this offense that is plenty." },
+    "Terry McLaurin": { f: "WR15", s: "2025: Daniels security blanket", o: 0, b: "The metronome. Ninety-plus targets of pure reliability with Daniels extending plays." },
+    "Garrett Wilson": { f: "WR21", s: "2025: talent taxed by Jets QB play", o: 0, b: "Top-15 talent, bottom-10 QB situation. Priced exactly at the midpoint of that fight." },
+    "D'Andre Swift": { f: "RB15", s: "2025: solid volume in Chicago", o: 0, b: "Ben Johnson-style usage keeps the receiving work flowing. Fine, never special." },
+    "Luther Burden III": { f: "WR35", s: "2025: rookie slot flashes", o: 1, b: "Moore exit frees the slot for good. Year-2 leap candidate with YAC juice." },
+    "Drake Maye": { f: "QB7", s: "2025: leap season in NE", o: 1, n: "AJ Brown AND Romeo Doubs airlifted in this offseason.", b: "Top-5 QB upside now. The weapons went from worst to enviable in one offseason." },
+    "Jameson Williams": { f: "WR24", s: "2025: field-tilting speed, weekly variance", o: 0, b: "Buy the spike weeks, survive the duds. The deep ball keeps the ceiling elite." },
+    "Ladd McConkey": { f: "WR17", s: "2025: route-running savant year", o: 1, n: "New OC Mike McDaniel schemes touches to slot winners.", b: "McDaniel YAC designs plus McConkey separation is a beautiful marriage. Target spike incoming." },
+    "Mike Evans": { f: "WR19", s: "2025: 1,000-yard streak intact, signed with SF", o: 0, b: "New team, same guy. Purdy needed an alpha X and got the most reliable one alive." },
+    "Sam LaPorta": { f: "TE4", s: "2025: steady in the Detroit machine", o: 0, b: "Elite offense, established role. The safest of the second-tier TEs." },
+    "Joe Burrow": { f: "QB6", s: "2025: elite when upright", o: 0, b: "When he plays, he is top-3 at the position. The o-line is the only asterisk." },
+    "Chuba Hubbard": { f: "RB14", s: "2025: earned the job outright", o: 0, b: "Brooks looming is the only cloud. Volume has been bankable for two years." },
+    "MHJ": { f: "WR28", s: "2025: sophomore step forward", o: 1, b: "The talent never left. Cleaner target tree this year and Love arrival forces honest defenses." },
+    "Bhayshul Tuten": { f: "RB24", s: "2025: explosive change-of-pace year", o: 1, b: "Etienne left for New Orleans — Tuten is the heir to the Jacksonville backfield. League-winner path." },
+    "Christian Watson": { f: "WR30", s: "2025: re-signed 4yr/~$100M", o: 1, n: "Doubs and Wicks both departed — clear GB WR1 now.", b: "Green Bay paid him and cleared the room. Injury history is the only tax on a true WR1 role." },
+    "Patrick Mahomes": { f: "QB9", s: "2025: pacing top-2 at QB before tearing ACL + MCL in Wk 15", o: 1, n: "FULLY CLEARED to practice. Reid taking it day-to-day, but every report points to Week 1 — and KC opens late (Sept 14).", b: "The knee discount is closing fast. Cleared, practicing, throwing deep touchdowns in camp. Buy before the market catches up." }, "George Kittle": { f: "TE3", s: "2025: elite until the January Achilles", o: 0, n: "Opened camp on active/PUP. GM John Lynch calls the rehab \u201ctremendous\u201d and Kittle is targeting Week 1 in Australia — but he is limited to side work for now.", b: "Top-4 TE when he plays. You are drafting the rehab timeline. Jake Tonges is the fallback if it slips." }, "JCM": { f: "RB22", s: "2025: goal-line juice in Washington", o: 1, b: "Committee lead with TD equity in a Daniels offense. The name is long; the path is short." },
+    "Tucker Kraft": { f: "TE2 per-game", s: "2025: breakout ended by Wk 9 ACL", o: 1, n: "ACL recovery lands right at season start.", b: "Was the TE2 in points-per-game before the injury. If the knee is ready, this is a top-5 TE at a TE9 price." },
+    "Carnell Tate": { f: "Rookie", s: "First rookie WR drafted — Tennessee", o: 1, b: "Cam Ward new alpha. Clearest path to a rookie WR1 role in the class." },
+    "Brian Thomas Jr.": { f: "WR44 (injured)", s: "2025: ankle/shoulder/wrist wrecked the year", o: 1, n: "Jags staff calls his offseason night and day. Market ADP ~WR32.", b: "The 2024 WR1 flashes were real. MVP-finalist Lawrence plus health equals the best bounce-back bet on the board." },
+    "Jayden Reed": { f: "WR33", s: "2025: YAC dynamo, WR2 role now", o: 0, b: "Watson is the alpha but Reed slot role survived the exodus. PPR-friendly floor." },
+    "Jaylen Warren": { f: "RB21", s: "2025: efficient as ever", o: 0, b: "Tandem with Dowdle, but Warren is the talent. Rodgers checkdowns are a bonus." },
+    "Trevor Lawrence": { f: "QB5 (MVP finalist)", s: "2025: Jags 2nd-best season in franchise history", o: 0, b: "The leap finally happened. Legit QB1 with his WR room healthy again." },
+    "Davante Adams": { f: "WR23", s: "2025: red-zone royalty with Stafford", o: -1, b: "Age-cliff watch is real, but Stafford still trusts him when it matters. One more year of it." },
+    "Jonathon Brooks": { f: "DNP 2025", s: "Two ACL tears — finally healthy", o: 1, n: "CAMP RISER: taking first-team reps and drawing praise from HC Dave Canales.", b: "Day-2 talent finally healthy and pushing Hubbard for the job. One of the best value swings on the board." }, "Kyle Pitts": { f: "TE9", s: "2025: the annual tease, one monster stretch", o: 0, b: "The boom-bust TE. His hot month came with London hurt — buy the flashes at a fair price, never at hope." },
+    "DK Metcalf": { f: "WR26", s: "2025: Steelers alpha", o: 0, b: "Forty-two-year-old Rodgers throwing him jump balls. Weirdly, it works." },
+    "Michael Pittman Jr.": { f: "WR31", s: "2025: traded to Pittsburgh", o: 0, b: "Chain-mover role next to Metcalf. Volume-safe, ceiling-capped." },
+    "Kenny Gainwell": { f: "RB28", s: "2025: late-season breakout, signed with TB", o: 0, b: "Broke out down the stretch and cashed in. Irving insurance with standalone PPR value." },
+    "Chris Godwin Jr.": { f: "WR38 (injury return)", s: "2025: worked back from the ankle", o: 1, n: "Fully healthy with glowing OTA reports.", b: "Could out-target Egbuka as Mayfield No. 1. The market is still pricing last year injury." },
+    "Jordyn Tyson": { f: "Rookie", s: "Day-2 separator to New Orleans", o: 1, b: "Olave contract year makes Tyson the 2027 alpha-in-waiting. Real YAC talent — prime rookie-keeper stash." },
+    "Justin Herbert": { f: "QB11", s: "2025: efficient, weaponry thin", o: 1, b: "McDaniel play-action arrives. Arm talent plus scheme help is a buy." },
+    "Courtland Sutton": { f: "WR27", s: "2025: Nix favorite target", o: 0, b: "Waddle arrival steals some shine, but the red-zone role is untouched." },
+    "Rico Dowdle": { f: "RB23", s: "2025: signed with PIT in March", o: 0, b: "Tandem with Warren. He earned real money — the touches will follow." },
+    "Dalton Kincaid": { f: "TE8", s: "2025: flashes, never the full leap", o: 0, b: "DJ Moore arrival hurts the target math. Talent keeps him on the radar." },
+    "Rhamondre Stevenson": { f: "RB20", s: "2025: steady in the Maye offense", o: 0, b: "An ascending offense lifts all boats. Grinder profile with pass-game value." },
+    "Zach Charbonnet": { f: "RB19 (pre-injury)", s: "2025: strong year ended by January ACL", o: -1, n: "Tore ACL in January; free agent after 2026.", b: "Misses significant 2026 time and Seattle drafted his replacement in Round 1. Stash only." },
+    "Jordan Addison": { f: "WR41", s: "2025: served 3-game suspension, QB carousel year", o: 1, b: "Suspension is behind him and Kyler Murray is the best QB he has had. Classic post-hype bounce-back." },
+    "Oronde Gadsden": { f: "TE10", s: "2025: mismatch flashes", o: 1, b: "McDaniel loves a chess-piece TE. Sneaky late-round TE1 upside." },
+    "Michael Wilson": { f: "WR40", s: "2025: reliable No. 2 in Arizona", o: 0, b: "MHJ gravity gives him single coverage. Fine depth, occasional spike." },
+    "Khalil Shakir": { f: "WR29", s: "2025: led BUF in targets", o: -1, b: "DJ Moore arrival ends the target-leader era. He has never cracked the top-36 even WITH the volume — WR4/5 now." },
+    "Rachaad White": { f: "RB27", s: "2025: pass-down vet in Washington", o: 0, b: "JCM handles the juice; White catches the checkdowns. Depth with a PPR floor." },
+    "Caleb Williams": { f: "QB12", s: "2025: step-forward year", o: 1, b: "Year 3 with a true WR1 in Odunze and a settled scheme. The arrow points up." },
+    "Blake Corum": { f: "RB30", s: "2025: carved out a real role", o: 0, b: "Kyren insurance with standalone flex weeks. LA trusts him more every month." },
+    "Isaiah Likely": { f: "TE11", s: "2025: left BAL for the Giants", o: 1, n: "With Nabers out the first month, beat writers expect Dart to lean on Likely heavily early.", b: "Finally out of Andrews shadow — and the Nabers injury makes him Dart security blanket No. 1 out of the gate." },
+    "Ricky Pearsall": { f: "WR36", s: "2025: late-season surge", o: 1, n: "Slated to start opposite Mike Evans.", b: "The 49ers kept betting on him and it is paying. Starter snaps plus Purdy equals sneaky value." },
+    "Travis Kelce": { f: "TE7", s: "2025: father time finally collecting", o: -1, b: "Age-37 tax. Still red-zone royalty in the best offense, but the weekly ceiling is gone." },
+    "Xavier Worthy": { f: "WR34", s: "2025: speed role grew all year", o: 1, n: "Still in a non-contact jersey at minicamp (shoulder labrum) — expected full participation by preseason.", b: "Even with Rice back, KC schemes him touches. Ceiling play in the champ machine." },
+    "Parker Washington": { f: "WR39", s: "2025: return-game star, growing slot role", o: 0, b: "Extension buzz says Jacksonville loves him. WR2/3 with an MVP-caliber QB." },
+    "Woody Marks": { f: "RB31", s: "2025: rookie pass-down flashes", o: 0, b: "Montgomery hammers; Marks catches. The Texans backfield split is stable." },
+    "Mark Andrews": { f: "TE5", s: "2025: red-zone monopoly held", o: -1, b: "Likely exit protects the role, but the athleticism is fading. TD-or-bust weeks now." },
+    "Travis Hunter": { f: "WR37", s: "2025: two-way rookie experiment", o: 1, b: "The WR reps keep climbing. Unicorn upside if Jacksonville ever commits him to offense full-time." },
+    "Aaron Jones": { f: "RB29", s: "2025: age showing, still crafty", o: -1, b: "Mason took the early downs by December. Veteran depth, nothing more." },
+    "Jake Ferguson": { f: "TE12", s: "2025: steady in Dallas", o: 0, b: "CeeDee gravity leaves him single-covered underneath. Streamer-plus." },
+    "Jaxson Dart": { f: "QB15", s: "2025: promising rookie year", o: 1, b: "Year-2 leap profile with Nabers as the cheat code. Late-QB1 upside." },
+    "Isiah Pacheco": { f: "RB25", s: "2025: traded to Detroit", o: 0, b: "Locked into the No. 2 role behind Gibbs. Violence as a service — TD vulture with standalone weeks." },
+    "Makai Lemon": { f: "Rookie", s: "Best tape of the rookie WR class", o: 1, b: "Route-running polish beyond his years. Crowded Philly room is the only knock." },
+    "Dallas Goedert": { f: "TE13", s: "2025: solid on a one-year deal", o: 0, b: "Stowers waits behind him. Productive now, replaceable soon." },
+    "JK Dobbins": { f: "RB26", s: "2025: stayed healthy in Denver", o: 0, b: "Coleman is coming for the job. Veteran floor while it lasts." },
+    "Alec Pierce": { f: "WR46", s: "2025: deep-threat spike weeks", o: 0, b: "Post-Pittman-trade he is the WR1 by title, but the boom-bust profile does not change. Best-ball darling, lineup headache." },
+    "Fernando Mendoza": { f: "Rookie", s: "Heisman winner, No. 1 OVERALL pick to Vegas", o: 1, n: "Kirk Cousins is lining up as the Wk 1 starter.", b: "The stash-and-takeover play. When the switch flips, the Bowers connection makes him a streamer with keeper legs." },
+    "Jerry Jeudy": { f: "WR42", s: "2025: down year with Browns QB chaos", o: 1, b: "Volume WR1 by default in Cleveland. ESPN calls him a value hiding in plain sight." },
+    "Tyrone Tracy": { f: "RB32", s: "2025: lost the job to Skattebo", o: -1, b: "Skattebo is the presumed starter now. Handcuff with juice if anything happens." },
+    "MarShawn Lloyd": { f: "RB45", s: "2025: buried, now buzzing", o: 1, n: "Strong camp reports — tracking toward GB RB2.", b: "The Jacobs insurance policy. If the legal situation breaks bad, Lloyd is a league-winner off waivers you already own." },
+    "Denzel Boston": { f: "Rookie", s: "Most impressive Browns spring performer", o: 1, b: "Camp-buzz king of the rookie class. Cleveland QB play caps the ceiling — the talent does not." },
+    "Stefon Diggs": { f: "WR25", s: "2025: 1,013 yards with NE, then released", o: -1, n: "Unsigned. Market: WSH, BAL, or retirement.", b: "Still productive last year. Draft the resume, hope for a signing — pure stash." },
+    "Tyreek Hill": { f: "WR48 (injured)", s: "2025: torn ACL + dislocated knee in September", o: -1, n: "Released by Miami; unsigned; may not be ready until midseason.", b: "The scariest what-if flier on the board. If he signs and the knee cooperates, the speed never graded below elite." },
+    "Deebo Samuel": { f: "WR43", s: "2025: role shrank in Washington", o: -1, b: "Unsigned vet. Someone will want the gadget juice — you are drafting a phone call." },
+    "Jauan Jennings": { f: "WR45", s: "2025: 975-yard grinder, signed with MIN", o: 0, b: "Slots as WR3 behind Jefferson and Addison. Physical chain-mover — injury-away value." },
+    "Christian Kirk": { f: "WR47", s: "2025: signed with SF this offseason", o: 0, b: "Slot duty in the Shanahan tree next to Evans and Pearsall. Volume dependable if injuries hit." },
+    "Alvin Kamara": { f: "RB33", s: "2025: age visible, still slippery", o: -1, b: "Etienne arrival relegates him to mentor and change-up. Name-brand discount applies." },
+    "Kirk Cousins": { f: "QB24", s: "2025: bridge duty, now in Vegas", o: 0, b: "Named the Wk 1 starter until Mendoza takes over. Kirko Chainz, streamer edition." },
+    "Aaron Rodgers": { f: "QB18", s: "2025: year 21, still slinging", o: -1, b: "Year 22. In Pittsburgh. With Metcalf and Pittman. Sure, why not." },
+    "Brandon Aiyuk": { f: "DNP since Oct 2024", s: "Reserve/Left Squad, still unresolved", o: -1, n: "Analysts now say each social-media outburst makes it harder to imagine him playing in 2026 at all.", b: "Final-round lottery ticket that keeps getting longer odds. Draft only if the last pick costs you nothing." }, "Trey Benson": { f: "RB38", s: "2025: efficient in relief", o: 0, b: "The Love handcuff now — and a first-round pick handcuff is the best kind to hold." },
+    "Germie Bernard": { f: "Rookie", s: "PIT 2nd-round rookie WR", o: 1, b: "Draft capital says Pittsburgh has plans. Deep rookie-keeper dart behind aging vets." },
+};
+function getPlayerCard(p) {
+    const c = PLAYER_CARDS[p.name];
+    if (c)
+        return c;
+    if (ROOKIE_TIER[p.name]) {
+        return ROOKIE_TIER[p.name] === 2
+            ? { f: "Rookie", s: "Day-2 capital with a path to snaps", o: 1, b: "Real draft investment from his NFL team. Prime rookie-keeper stash with year-one flex potential." }
+            : { f: "Rookie", s: "2026 rookie — no NFL resume yet", o: 1, b: "Deep rookie dart. You are drafting the 3-year keeper window, not Week 1 production." };
+    }
+    if (p.rank <= 150)
+        return { f: "—", s: "2025: depth-chart contributor", o: 0, b: "Bench depth with a pulse — one injury away from flex relevance." };
+    return { f: "—", s: "2025: fringe roster player", o: 0, b: "Pure dart throw. If it hits you look like a genius; if it misses it cost you nothing." };
+}
+function autoDraftPick(manager, takenNames, picks, chaosOn = false) {
+    var _a, _b, _c;
+    const { counts, draftedTotal } = getRosterCounts(manager, picks);
+    const round = draftedTotal + 1;
+    let available = PLAYERS
+        .filter(p => !takenNames.has(p.name))
+        .filter(p => canDraftPos(manager, p.pos, picks))
+        .sort((a, b) => a.rank - b.rank);
+    if (available.length === 0)
+        return null;
+    // Effective need at each position, factoring in keeper QUALITY
+    // A "solid" or "unproven" keeper still leaves a need; only "elite" reduces urgency
+    const rbKeeper = getKeeperQuality(manager, "RB");
+    const wrKeeper = getKeeperQuality(manager, "WR");
+    // How many real starters do we have at each spot (elite/solid keepers + drafted)
+    const rbHave = counts.RB;
+    const wrHave = counts.WR;
+    const qbHave = counts.QB;
+    const teHave = counts.TE;
+    const rbElite = rbKeeper === "elite";
+    const wrElite = wrKeeper === "elite";
+    // Apply rookie premium using tiered logic (Tier 1 rookie forced into Round 1, etc.)
+    // A manager who hasn't secured a rookie keeper yet values rookies even more.
+    const rookieSlotFilled = hasRookieKeeperSlotFilled(manager, picks);
+    // "Gut factor": when chaos is on, add random jitter so managers reach/wait like real people.
+    // Scaled by the manager's personality and dampened in early rounds (less chaos up top).
+    const chaosAmt = chaosOn ? ((_a = MANAGER_CHAOS[manager]) !== null && _a !== void 0 ? _a : 0.6) : 0;
+    // Round 1 still has real swing now (0.55 floor) so the same studs don't always survive.
+    const roundDamp = chaosOn ? Math.max(0.55, Math.min(1, round / 4)) : Math.min(1, round / 4);
+    const scored = available.map(p => {
+        var _a;
+        let eff = ROOKIE_TIER[p.name]
+            ? rookieEffectiveRank(p.name, p.rank, rookieSlotFilled)
+            : p.rank;
+        if (chaosAmt > 0) {
+            const tier = overallTier(p.rank);
+            const tierLo = tier === 1 ? 1 : OVERALL_TIER_BREAKS[tier - 2] + 1;
+            const tierHi = (_a = OVERALL_TIER_BREAKS[tier - 1]) !== null && _a !== void 0 ? _a : (p.rank + 12);
+            const tierSpan = Math.max(6, tierHi - tierLo);
+            // Locks (top 4) barely wiggle — Bijan/Gibbs go 1-2 like they should.
+            const amp = p.rank <= 4 ? 0.25 : 0.9;
+            const swing = chaosAmt * roundDamp * tierSpan * amp;
+            eff += (Math.random() - 0.5) * 2 * swing;
+            const roll = Math.random();
+            // REACH, two bands: ranks 11-16 get mild reach odds (they're going soon anyway);
+            // ranks 17-28 — the CLASSIC reach names (K-Walker, Chase Brown, Rice, Nico) — get
+            // healthy odds. When one of them goes early, a stud slides. That coupling is real
+            // draft physics. Landing floor keeps every reach out of the top 6.
+            const reachP = p.rank > 16 && p.rank <= 28 ? 0.11 : p.rank > 10 && p.rank <= 16 ? 0.06 : 0;
+            if (reachP > 0 && roll < reachP * (chaosAmt + 0.35)) {
+                const reached = eff - tierSpan * (0.9 + Math.random() * 0.6);
+                eff = Math.max(reached, 7 + Math.random() * 3.5);
+            }
+            // COLD SHOULDER: a stud (5-14) occasionally gets passed on — chained with a reach,
+            // that's how a Jefferson slides to the back of round 1. Rare enough to stay special.
+            else if (p.rank > 4 && p.rank <= 14 && roll > 1 - 0.03 * (chaosAmt + 0.35)) {
+                eff += tierSpan * (0.5 + Math.random() * 0.5);
+            }
+        }
+        return { player: p, eff };
+    }).sort((a, b) => a.eff - b.eff);
+    const byPos = (pos) => scored.filter(s => s.player.pos === pos);
+    const bestRB = byPos("RB")[0];
+    const bestWR = byPos("WR")[0];
+    const bestQB = byPos("QB")[0];
+    const bestTE = byPos("TE")[0];
+    const rbWr = scored.filter(s => s.player.pos === "RB" || s.player.pos === "WR");
+    const lastTwo = lastTwoPicksPos(manager, picks);
+    const twoInARow = (pos) => lastTwo.length === 2 && lastTwo[0] === pos && lastTwo[1] === pos;
+    // League scarcity: how many QBs / TEs already drafted THIS round across all managers.
+    // Board history shows only ~1-2 QBs and ~1 TE come off per round — don't let CPUs cluster.
+    const thisRoundPicks = picks.filter(p => p.round === round);
+    const qbsThisRound = thisRoundPicks.filter(p => p.player.pos === "QB").length;
+    const tesThisRound = thisRoundPicks.filter(p => p.player.pos === "TE").length;
+    const qbSaturated = qbsThisRound >= 2; // 2 QBs already gone this round → hold off
+    const teSaturated = tesThisRound >= 1; // 1 TE already gone this round → hold off
+    // ---- ROUND 1-2: build the RB/WR core, respect keeper quality ----
+    if (round <= 2) {
+        // Quality-aware starter counts: unproven rookie keepers only half-fill a slot
+        // (Jaydon Blue is a lottery ticket, not an RB1)
+        const realStarters = (pos) => {
+            const drafted = picks.filter(p => p.manager === manager && p.player.pos === pos).length;
+            const keeps = KEEPERS.filter(k => k.manager === manager && k.pos === pos)
+                .reduce((s, k) => s + (KEEPER_QUALITY[k.name] === "unproven" ? 0.5 : 1), 0);
+            return drafted + keeps;
+        };
+        const rbReal = realStarters("RB"), wrReal = realStarters("WR");
+        // Elite TE value (McBride top ~25) only if we have a decent RB/WR situation
+        if (bestTE && bestTE.player.rank <= 25 && teHave === 0) {
+            if (rbReal >= 1 && wrReal >= 1 && bestTE.eff < ((_c = (_b = rbWr[0]) === null || _b === void 0 ? void 0 : _b.eff) !== null && _c !== void 0 ? _c : 999))
+                return bestTE.player;
+        }
+        // RB hole: RB1s evaporate by R2 in this league — never pass equal-or-better RB value
+        if (rbReal < 1 && bestRB && (!bestWR || bestRB.eff <= bestWR.eff + 2))
+            return bestRB.player;
+        // WR hole: lean WR only when values are close (never leapfrog a clearly better RB)
+        if (wrReal < 1 && bestWR && (!bestRB || bestWR.eff <= bestRB.eff + 3))
+            return bestWR.player;
+        // Otherwise best RB/WR by value
+        if (rbWr.length)
+            return rbWr[0].player;
+    }
+    // ---- ROUND 3-5: fill RB/WR core. Only the TRULY elite QB/TE sneak in, and only
+    // if the round isn't already saturated (boards show ~1-2 QB, ~1 TE per round max). ----
+    if (round >= 3 && round <= 5) {
+        // Elite QB: top-30 only, must clearly beat the board, and round not QB-saturated
+        if (qbHave === 0 && !qbSaturated && bestQB && bestQB.player.rank <= 30) {
+            if (!rbWr.length || bestQB.player.rank <= (rbWr[0].player.rank - 2))
+                return bestQB.player;
+        }
+        // Elite TE: top-30 only (McBride/Bowers tier), round not TE-saturated
+        if (teHave === 0 && !teSaturated && bestTE && bestTE.player.rank <= 30) {
+            if (!rbWr.length || bestTE.player.rank <= (rbWr[0].player.rank + 2))
+                return bestTE.player;
+        }
+        // Otherwise RB/WR, avoiding a 3rd straight of one position unless top-20 value
+        if (rbWr.length) {
+            const filtered = rbWr.filter(s => !(twoInARow(s.player.pos) && s.player.rank > 20));
+            const bestFiltered = filtered[0] || rbWr[0];
+            return bestFiltered.player;
+        }
+    }
+    // ---- ROUND 6-9: fill QB (1) and TE (1) — most managers get theirs here, spaced out ----
+    if (round >= 6 && round <= 9) {
+        if (qbHave === 0 && !qbSaturated && bestQB && bestQB.player.rank <= 130) {
+            if (!rbWr.length || bestQB.player.rank < rbWr[0].player.rank + 12)
+                return bestQB.player;
+        }
+        if (teHave === 0 && !teSaturated && bestTE && bestTE.player.rank <= 120) {
+            if (!rbWr.length || bestTE.player.rank < rbWr[0].player.rank + 12)
+                return bestTE.player;
+        }
+        // prefer RB/WR depth
+        if (rbWr.length)
+            return rbWr[0].player;
+    }
+    // ---- LATE (round 10+): build RB/WR depth. Only fill an empty QB/TE, never stack a 2nd. ----
+    // Managers hoard RB/WR for bench/flex; QB and TE are one-and-done unless elite value earlier.
+    if (qbHave === 0 && bestQB && (!rbWr.length || bestQB.player.rank < rbWr[0].player.rank + 20))
+        return bestQB.player;
+    if (teHave === 0 && bestTE && (!rbWr.length || bestTE.player.rank < rbWr[0].player.rank + 20))
+        return bestTE.player;
+    // R12+: a clearly-superior leftover QB/TE (a Kelce/Prescott type) can be a bench grab —
+    // but only when he's dramatically better value than the remaining RB/WR fliers.
+    if (round >= 12 && qbHave === 1 && bestQB && bestQB.player.rank <= 120 && rbWr.length && bestQB.player.rank + 25 < rbWr[0].player.rank)
+        return bestQB.player;
+    if (round >= 12 && teHave === 1 && bestTE && bestTE.player.rank <= 110 && rbWr.length && bestTE.player.rank + 25 < rbWr[0].player.rank)
+        return bestTE.player;
+    // Prefer RB/WR depth for the bench
+    if (rbWr.length)
+        return rbWr[0].player;
+    // Only if literally no RB/WR left, take best available (QB/TE)
+    return scored[0].player;
+}
+// ============ TEAM ANALYSIS ENGINE ============
+// Computes positional strength, an overall grade, a synopsis, plus league-wide
+// steal/reach, predicted standings, and trade suggestions. All tuned to this league.
+function playerValue(rank) {
+    // Convert a rank into a 0-100 value score (lower rank = higher value)
+    if (rank == null)
+        return 55; // keeper with unknown rank -> assume solid starter
+    if (rank <= 3)
+        return 100;
+    if (rank <= 8)
+        return 94;
+    if (rank <= 15)
+        return 88;
+    if (rank <= 25)
+        return 80;
+    if (rank <= 40)
+        return 70;
+    if (rank <= 60)
+        return 60;
+    if (rank <= 85)
+        return 50;
+    if (rank <= 110)
+        return 40;
+    if (rank <= 140)
+        return 30;
+    return 22;
+}
+function getAllPlayers(manager, picks) {
+    const keepers = KEEPERS.filter(k => k.manager === manager).map(k => {
+        // find rank if the keeper exists in the player universe, else estimate by quality
+        const q = KEEPER_QUALITY[k.name];
+        const estRank = q === "elite" ? 6 : q === "solid" ? 30 : 70;
+        return { name: k.name, pos: k.pos, rank: estRank, isKeeper: true };
+    });
+    const drafted = picks.filter(p => p.manager === manager).map(p => ({
+        name: p.player.name, pos: p.player.pos, rank: p.player.rank, isKeeper: false
+    }));
+    return [...keepers, ...drafted];
+}
+function positionStrength(manager, picks) {
+    const all = getAllPlayers(manager, picks);
+    const byPos = { QB: [], RB: [], WR: [], TE: [] };
+    all.forEach(p => { if (byPos[p.pos])
+        byPos[p.pos].push(playerValue(p.rank)); });
+    Object.keys(byPos).forEach(pos => byPos[pos].sort((a, b) => b - a));
+    // Starters counted per league: QB1, RB2, WR3, TE1 (+ flex handled in overall)
+    const starterCounts = { QB: 1, RB: 2, WR: 3, TE: 1 };
+    const strength = {};
+    Object.keys(starterCounts).forEach(pos => {
+        const top = byPos[pos].slice(0, starterCounts[pos]);
+        const avg = top.length ? top.reduce((a, b) => a + b, 0) / top.length : 15;
+        // depth bonus: extra quality bodies beyond starters
+        const depth = byPos[pos].slice(starterCounts[pos]).filter(v => v >= 50).length;
+        strength[pos] = Math.min(100, Math.round(avg + depth * 3));
+    });
+    return strength;
+}
+function teamOverall(manager, picks) {
+    const s = positionStrength(manager, picks);
+    // Weighted: RB & WR matter most in 0.5 PPR, TE/QB less
+    const overall = s.RB * 0.32 + s.WR * 0.38 + s.QB * 0.13 + s.TE * 0.17;
+    return Math.round(overall);
+}
+function gradeFromScore(score) {
+    if (score >= 82)
+        return "A+";
+    if (score >= 78)
+        return "A";
+    if (score >= 74)
+        return "A-";
+    if (score >= 70)
+        return "B+";
+    if (score >= 66)
+        return "B";
+    if (score >= 62)
+        return "B-";
+    if (score >= 58)
+        return "C+";
+    if (score >= 54)
+        return "C";
+    return "C-";
+}
+function teamSynopsis(manager, picks) {
+    const s = positionStrength(manager, picks);
+    const all = getAllPlayers(manager, picks);
+    const posName = { QB: "QB", RB: "RB", WR: "WR", TE: "TE" };
+    const entries = Object.entries(s).sort((a, b) => b[1] - a[1]);
+    const best = entries[0], worst = entries[entries.length - 1];
+    // Best player
+    const sorted = [...all].sort((a, b) => playerValue(b.rank) - playerValue(a.rank));
+    const stud = sorted[0];
+    const rookies = all.filter(p => ROOKIE_TIER[p.name]);
+    let synopsis = `Built around ${stud ? stud.name : "a balanced core"}. `;
+    synopsis += `Strongest at ${posName[best[0]]} (${best[1]}), `;
+    synopsis += worst[1] < 55 ? `but ${posName[worst[0]]} is a real concern (${worst[1]}) and needs waiver attention.` : `with ${posName[worst[0]]} the softest spot (${worst[1]}).`;
+    if (rookies.length) {
+        synopsis += ` Holds ${rookies.length} rookie keeper asset${rookies.length > 1 ? "s" : ""} (${rookies.map(r => r.name.split(" ").slice(-1)[0]).join(", ")}) for the 3-year window.`;
+    }
+    return synopsis;
+}
+function leagueStealsAndReaches(picks) {
+    // Steal = drafted much later than rank suggests; Reach = much earlier
+    const scored = picks.map((p, i) => {
+        var _a;
+        const overall = i + 1;
+        const rank = (_a = p.player.rank) !== null && _a !== void 0 ? _a : 100;
+        // rookies get expected-value boost so reaching on them isn't flagged as a reach
+        const adjRank = ROOKIE_TIER[p.player.name] ? Math.min(rank, ROOKIE_TIER[p.player.name] === 1 ? 6 : rank - 18) : rank;
+        const diff = overall - adjRank; // positive = fell (steal), negative = reach
+        return { ...p, overall, diff, rank };
+    });
+    const steals = [...scored].filter(p => !ROOKIE_TIER[p.player.name]).sort((a, b) => b.diff - a.diff).slice(0, 3);
+    const reaches = [...scored].filter(p => !ROOKIE_TIER[p.player.name]).sort((a, b) => a.diff - b.diff).slice(0, 3);
+    return { steals, reaches };
+}
+function predictedStandings(picks) {
+    return MANAGERS.map(m => ({ manager: m, score: teamOverall(m, picks) }))
+        .sort((a, b) => b.score - a.score);
+}
+function DraftSimulator() {
+    const [picks, setPicks] = useState([]);
+    const [currentRound, setCurrentRound] = useState(1);
+    const [currentSlot, setCurrentSlot] = useState(0);
+    const [search, setSearch] = useState("");
+    const [filterPos, setFilterPos] = useState("ALL");
+    const [activeTab, setActiveTab] = useState("setup");
+    const [myManager, setMyManager] = useState(null);
+    const [draftStarted, setDraftStarted] = useState(false);
+    const [copied, setCopied] = useState(false);
+    const [exportText, setExportText] = useState("");
+    const [cardPlayer, setCardPlayer] = useState(null);
+    const [savedMocks, setSavedMocks] = useState([]);
+    const [viewMock, setViewMock] = useState(null);
+    const [mockSaved, setMockSaved] = useState(false);
+    // Load saved mocks from persistent storage on mount
+    useEffect(() => {
+        (async () => {
+            try {
+                const r = await window.storage.get("bbfl-mocks");
+                if (r && r.value)
+                    setSavedMocks(JSON.parse(r.value));
+            }
+            catch (e) { /* no saved mocks yet */ }
+        })();
+    }, []);
+    const persistMocks = async (next) => {
+        setSavedMocks(next);
+        try {
+            await window.storage.set("bbfl-mocks", JSON.stringify(next));
+        }
+        catch (e) { /* storage unavailable — kept in memory */ }
+    };
+    const saveMock = () => {
+        const d = new Date();
+        const mock = {
+            id: Date.now(),
+            label: `${myManager || "Manual"} · ${d.toLocaleDateString()} ${d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`,
+            picks: picks.map(p => ({ m: p.manager, r: p.round, n: p.player.name, pos: p.player.pos })),
+        };
+        persistMocks([mock, ...savedMocks].slice(0, 10));
+        setMockSaved(true);
+        setTimeout(() => setMockSaved(false), 2000);
+    };
+    const deleteMock = (id) => persistMocks(savedMocks.filter(m => m.id !== id));
+    const [autoRunning, setAutoRunning] = useState(false);
+    const [finishAuto, setFinishAuto] = useState(false);
+    const [chaosMode, setChaosMode] = useState(true); // realistic draft variance on by default
+    const totalRounds = Object.keys(DRAFT_ORDER).length; // includes makeup rounds
+    const takenNames = useMemo(() => new Set(picks.map(p => p.player.name)), [picks]);
+    const advanceSlot = (fromRound, fromSlot, currentPicks) => {
+        let round = fromRound;
+        let slot = fromSlot + 1;
+        // Advance past slots where the manager's roster is full (or has no draftable player)
+        while (round <= totalRounds) {
+            const order = DRAFT_ORDER[round];
+            if (!order || slot >= order.length) {
+                round++;
+                slot = 0;
+                continue;
+            }
+            const mgr = order[slot];
+            if (isRosterFull(mgr, currentPicks)) {
+                slot++;
+                continue;
+            }
+            break;
+        }
+        return { round, slot };
+    };
+    const currentManager = useMemo(() => {
+        if (currentRound > totalRounds)
+            return null;
+        const order = DRAFT_ORDER[currentRound];
+        if (!order || currentSlot >= order.length)
+            return null;
+        return order[currentSlot];
+    }, [currentRound, currentSlot]);
+    const isDone = currentRound > totalRounds || !currentManager;
+    const isMyTurn = draftStarted && currentManager === myManager;
+    const manualMode = draftStarted && !myManager;
+    // Show the player picker when: my turn in sim mode, OR manual mode — and never while auto-finishing
+    const showPicker = !finishAuto && (isMyTurn || manualMode);
+    // Safety: if the current manager's roster is full, auto-advance so the draft never freezes on a full team
+    useEffect(() => {
+        if (!draftStarted || isDone || !currentManager)
+            return;
+        if (isRosterFull(currentManager, picks)) {
+            const { round, slot } = advanceSlot(currentRound, currentSlot, picks);
+            setCurrentRound(round);
+            setCurrentSlot(slot);
+        }
+    }, [currentManager, draftStarted, isDone, picks]);
+    const rosters = useMemo(() => {
+        const r = {};
+        MANAGERS.forEach(m => { r[m] = { keepers: KEEPERS.filter(k => k.manager === m), drafted: [] }; });
+        picks.forEach(p => { if (r[p.manager])
+            r[p.manager].drafted.push(p); });
+        return r;
+    }, [picks]);
+    const availablePlayers = useMemo(() => {
+        const isRookieFilter = filterPos === "ROOKIE";
+        return PLAYERS
+            .filter(p => !takenNames.has(p.name))
+            .filter(p => isRookieFilter ? ROOKIE_TIER[p.name] : filterPos === "FLEX" ? p.pos !== "QB" : (filterPos === "ALL" || p.pos === filterPos))
+            .filter(p => p.name.toLowerCase().includes(search.toLowerCase()) || p.team.toLowerCase().includes(search.toLowerCase()))
+            .filter(p => !currentManager || canDraftPos(currentManager, p.pos, picks))
+            .sort((a, b) => {
+            // FLEX view: sort by flex value — TEs discounted (dart RB/WRs hit more than TE7s)
+            if (filterPos === "FLEX") {
+                const fa = a.rank + (a.pos === "TE" ? 28 : 0), fb = b.rank + (b.pos === "TE" ? 28 : 0);
+                return fa - fb;
+            }
+            // In rookie view, sort by tier first (1 = best), then by rank
+            if (isRookieFilter) {
+                const ta = ROOKIE_TIER[a.name] || 9, tb = ROOKIE_TIER[b.name] || 9;
+                if (ta !== tb)
+                    return ta - tb;
+            }
+            return a.rank - b.rank;
+        });
+    }, [takenNames, filterPos, search, currentManager, picks]);
+    // Suggested pick: the smart CPU choice for whoever is on the clock (for subtle highlight)
+    const suggestedName = useMemo(() => {
+        if (!currentManager || isDone)
+            return null;
+        const p = autoDraftPick(currentManager, takenNames, picks);
+        return p ? p.name : null;
+    }, [currentManager, takenNames, picks, isDone]);
+    const draftPlayer = (player, isAuto = false) => {
+        if (!currentManager || currentRound > totalRounds)
+            return;
+        if (!canDraftPos(currentManager, player.pos, picks))
+            return;
+        const newPick = { round: currentRound, slot: currentSlot, manager: currentManager, player };
+        const newPicks = [...picks, newPick];
+        setPicks(newPicks);
+        const { round: nextRound, slot: nextSlot } = advanceSlot(currentRound, currentSlot, newPicks);
+        setCurrentRound(nextRound);
+        setCurrentSlot(nextSlot);
+        if (!isAuto)
+            setSearch("");
+    };
+    const undoLastPick = () => {
+        if (picks.length === 0)
+            return;
+        setFinishAuto(false); // stop auto-finishing if it was running
+        // In manager mode, undo back to (and including) MY last pick, rolling back the
+        // CPU picks made after it — so I land back on the clock for my own selection.
+        if (myManager) {
+            let idx = -1;
+            for (let i = picks.length - 1; i >= 0; i--) {
+                if (picks[i].manager === myManager) {
+                    idx = i;
+                    break;
+                }
+            }
+            if (idx >= 0) {
+                const myPick = picks[idx];
+                setPicks(prev => prev.slice(0, idx)); // remove my pick + everything after it
+                setCurrentRound(myPick.round);
+                setCurrentSlot(myPick.slot);
+                return;
+            }
+            // no pick of mine yet — fall through to single undo
+        }
+        // Manual mode (or no pick of mine yet): undo just the single last pick
+        const last = picks[picks.length - 1];
+        setPicks(prev => prev.slice(0, -1));
+        setCurrentRound(last.round);
+        setCurrentSlot(last.slot);
+    };
+    // Auto-draft CPU picks (and my picks too when "Finish with Auto" is on)
+    useEffect(() => {
+        if (!draftStarted || isDone || autoRunning)
+            return;
+        if (!currentManager)
+            return;
+        // Manual Mode (no manager chosen): user drafts everyone. Only auto-draft if finishAuto is on.
+        if (!myManager && !finishAuto)
+            return;
+        // Simulator Mode: don't auto-draft on my turn unless finishAuto is on.
+        if (isMyTurn && !finishAuto)
+            return;
+        const timer = setTimeout(() => {
+            setAutoRunning(true);
+            const player = autoDraftPick(currentManager, takenNames, picks, chaosMode);
+            if (player) {
+                draftPlayer(player, true);
+            }
+            else {
+                // No draftable player for this manager (all needed positions capped).
+                // Force-advance PAST the current slot so we never freeze on the same pick.
+                let round = currentRound;
+                let slot = currentSlot + 1;
+                while (round <= totalRounds) {
+                    const order = DRAFT_ORDER[round];
+                    if (!order || slot >= order.length) {
+                        round++;
+                        slot = 0;
+                        continue;
+                    }
+                    const mgr = order[slot];
+                    // skip full teams AND teams with no draftable player
+                    if (isRosterFull(mgr, picks) || !autoDraftPick(mgr, takenNames, picks)) {
+                        slot++;
+                        continue;
+                    }
+                    break;
+                }
+                setCurrentRound(round);
+                setCurrentSlot(slot);
+            }
+            setAutoRunning(false);
+        }, finishAuto ? 120 : 400);
+        return () => clearTimeout(timer);
+    }, [currentManager, draftStarted, isMyTurn, isDone, picks, finishAuto, myManager, chaosMode]);
+    const exportRosters = () => {
+        const lines = ["🏈 BREW BOWL 2026 DRAFT RESULTS\n"];
+        // Map each pick to its overall pick number (order made)
+        const overallByKey = {};
+        picks.forEach((p, i) => { overallByKey[`${p.manager}-${p.round}-${p.player.name}`] = i + 1; });
+        DRAFT_ORDER[1].forEach(mgr => {
+            const roster = rosters[mgr];
+            const keeperStr = roster.keepers.map(k => `${k.name}(${k.type === "Vet" ? "V" : "R"})`).join(", ");
+            const draftedStr = roster.drafted.map(p => {
+                const ovr = overallByKey[`${mgr}-${p.round}-${p.player.name}`];
+                const rook = ROOKIE_TIER[p.player.name] ? " [R]" : "";
+                return `${ovr}.(R${p.round}) ${displayName(p.player.name)} ${p.player.pos} ${p.player.team}${rook}`;
+            }).join(" | ");
+            lines.push(`${mgr}: ${keeperStr} || ${draftedStr || "No picks yet"}`);
+        });
+        const text = lines.join("\n");
+        // Always show the text on screen (reliable). Also TRY clipboard as a bonus.
+        setExportText(text);
+        try {
+            if (navigator.clipboard && navigator.clipboard.writeText) {
+                navigator.clipboard.writeText(text).then(() => {
+                    setCopied(true);
+                    setTimeout(() => setCopied(false), 2000);
+                }).catch(() => { });
+            }
+        }
+        catch (e) { /* clipboard blocked — the on-screen box is the fallback */ }
+    };
+    const exportPDF = () => {
+        const overallByKey = {};
+        picks.forEach((p, i) => { overallByKey[`${p.manager}-${p.round}-${p.player.name}`] = i + 1; });
+        const teamCards = DRAFT_ORDER[1].map(mgr => {
+            const roster = rosters[mgr];
+            const keeperStr = roster.keepers.map(k => `${k.name} (${k.type === "Vet" ? "V" : "R"})`).join(" · ");
+            const rows = roster.drafted.map(p => {
+                const ovr = overallByKey[`${mgr}-${p.round}-${p.player.name}`];
+                const rook = ROOKIE_TIER[p.player.name] ? ' <span style="color:#7c3aed;font-weight:700;">★R</span>' : "";
+                const posColors = { RB: "#0b7a3b", WR: "#1e5fa8", QB: "#6d28d9", TE: "#b45309" };
+                return `<tr><td style="color:#999;width:52px;">${ovr}·R${p.round}</td><td style="width:34px;"><b style="color:${posColors[p.player.pos] || '#333'}">${p.player.pos}</b></td><td><b>${displayName(p.player.name)}</b>${rook}</td><td style="color:#777;width:38px;">${p.player.team}</td></tr>`;
+            }).join("");
+            return `<div class="card"><div class="mgr" style="color:${MGR_COLORS[mgr]}">${mgr}</div><div class="keep">Keepers: ${keeperStr}</div><table>${rows}</table></div>`;
+        }).join("");
+        const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Brew Bowl 2026 Draft Results</title>
+      <style>
+        @page { margin: 14mm; }
+        body { font-family: -apple-system, Segoe UI, Roboto, sans-serif; color:#1a1a1a; padding:10px; }
+        h1 { font-size:22px; text-align:center; margin:0 0 4px; }
+        .sub { text-align:center; color:#888; font-size:11px; margin-bottom:16px; }
+        .grid { display:grid; grid-template-columns:1fr 1fr; gap:12px; }
+        .card { border:1px solid #ddd; border-radius:8px; padding:10px 12px; break-inside:avoid; }
+        .mgr { font-size:15px; font-weight:800; margin-bottom:2px; }
+        .keep { font-size:10px; color:#555; margin-bottom:6px; padding-bottom:5px; border-bottom:1px solid #eee; }
+        table { width:100%; border-collapse:collapse; font-size:10.5px; }
+        td { padding:2px 3px; vertical-align:top; }
+      </style></head>
+      <body>
+        <h1>🏈 Brew Bowl 2026 — Draft Results</h1>
+        <div class="sub">Est. 2013 · Mock Draft · ${new Date().toLocaleDateString()}</div>
+        <div class="grid">${teamCards}</div>
+      </body></html>`;
+        const w = window.open("", "_blank");
+        if (w) {
+            w.document.write(html);
+            w.document.close();
+            setTimeout(() => { w.print(); }, 400);
+        }
+    };
+    const resetDraft = () => {
+        setPicks([]);
+        setCurrentRound(1);
+        setCurrentSlot(0);
+        setSearch("");
+        setFilterPos("ALL");
+        setDraftStarted(false);
+        setMyManager(null);
+        setFinishAuto(false);
+        setActiveTab("setup");
+    };
+    // ===== DESIGN TOKENS — "Broadcast Draft Room" =====
+    // Base: midnight navy. Panels: elevated slate. Accents: stadium amber + live teal.
+    const T = {
+        bg: "#0B1020",
+        bgGrad: "linear-gradient(180deg, #0D1428 0%, #0B1020 100%)",
+        panel: "#151B2E",
+        panelHi: "#1B2338",
+        line: "#252E45",
+        lineHi: "#334063",
+        text: "#EAF0FF",
+        textDim: "#8A96B4",
+        textFaint: "#5A6683",
+        amber: "#F2A33C",
+        amberDim: "#8A6520",
+        teal: "#2DD4A7",
+        tealDim: "#0F3D33",
+        red: "#F2545B",
+        redDim: "#3D1518",
+    };
+    const styles = {
+        app: { background: `radial-gradient(1200px 600px at 50% -10%, #141C33 0%, ${T.bg} 55%)`, minHeight: "100vh", fontFamily: "'Inter', sans-serif", color: T.text },
+        header: { background: "rgba(11,16,32,0.85)", backdropFilter: "blur(8px)", borderBottom: `1px solid ${T.line}`, padding: "14px 18px", display: "flex", alignItems: "center", justifyContent: "space-between", position: "sticky", top: 0, zIndex: 10 },
+        title: { fontFamily: "'Bebas Neue', sans-serif", fontSize: "1.75rem", letterSpacing: "2px", color: T.text, margin: 0, display: "flex", alignItems: "center", gap: "8px" },
+        tabs: { display: "flex", gap: "6px", padding: "12px 18px", borderBottom: `1px solid ${T.line}`, flexWrap: "wrap" },
+        tab: (active) => ({ padding: "7px 16px", borderRadius: "999px", border: "1px solid", borderColor: active ? T.amber : T.line, background: active ? "rgba(242,163,60,0.12)" : "transparent", color: active ? T.amber : T.textDim, cursor: "pointer", fontSize: "0.72rem", fontWeight: "700", letterSpacing: "0.5px", textTransform: "uppercase", transition: "all 0.15s" }),
+        pickBanner: { background: `linear-gradient(180deg, ${T.panelHi} 0%, ${T.panel} 100%)`, borderBottom: `2px solid ${T.amber}`, padding: "14px 18px", display: "flex", alignItems: "center", justifyContent: "space-between" },
+        myTurnBanner: { background: `linear-gradient(180deg, #123 0%, ${T.panel} 100%)`, borderBottom: `2px solid ${T.teal}`, padding: "14px 18px", display: "flex", alignItems: "center", justifyContent: "space-between" },
+        searchBar: { padding: "12px 18px", display: "flex", gap: "8px", background: "transparent", flexWrap: "wrap" },
+        input: { flex: 1, minWidth: "120px", background: T.panel, border: `1px solid ${T.line}`, borderRadius: "10px", padding: "10px 14px", color: T.text, fontSize: "0.85rem", outline: "none" },
+        filterBtn: (active, pos) => { const rk = pos === "ROOKIE"; const s = rk ? { color: "#c4b5fd", background: "rgba(139,92,246,0.15)", border: "#4c1d95" } : POS_STYLE(pos || ""); return { padding: "8px 12px", borderRadius: "8px", border: "1px solid", borderColor: active ? (s.color || T.amber) : T.line, background: active ? (s.background || "rgba(242,163,60,0.12)") : T.panel, color: active ? (s.color || T.amber) : T.textDim, cursor: "pointer", fontSize: "0.7rem", fontWeight: "800", letterSpacing: "0.5px", whiteSpace: "nowrap" }; },
+        playerList: { overflowY: "auto", maxHeight: "calc(100vh - 320px)", padding: "6px 18px 24px" },
+        playerRow: { display: "flex", alignItems: "center", justifyContent: "space-between", padding: "11px 13px", borderRadius: "12px", marginBottom: "6px", background: T.panel, border: `1px solid ${T.line}`, cursor: "pointer", transition: "all 0.12s" },
+        takenRow: { display: "flex", alignItems: "center", justifyContent: "space-between", padding: "11px 13px", borderRadius: "12px", marginBottom: "6px", background: "rgba(21,27,46,0.4)", border: `1px solid ${T.line}`, opacity: 0.35 },
+        rosterGrid: { display: "grid", gridTemplateColumns: "1fr 1fr", gap: "10px", padding: "14px 18px", overflowY: "auto", maxHeight: "calc(100vh - 170px)" },
+        rosterCard: { background: T.panel, border: `1px solid ${T.line}`, borderRadius: "14px", padding: "14px", position: "relative", overflow: "hidden" },
+        setupScreen: { padding: "24px 18px", maxWidth: "520px", margin: "0 auto" },
+        mgr_btn: (m, selected) => ({ padding: "14px 10px", borderRadius: "12px", border: `1.5px solid ${selected ? MGR_COLORS[m] : T.line}`, background: selected ? `${MGR_COLORS[m]}1f` : T.panel, color: selected ? "#fff" : T.textDim, cursor: "pointer", fontWeight: "700", fontSize: "0.85rem", textAlign: "center", transition: "all 0.15s", boxShadow: selected ? `0 0 0 1px ${MGR_COLORS[m]}55, 0 4px 16px ${MGR_COLORS[m]}22` : "none" }),
+        startBtn: { width: "100%", padding: "15px", background: `linear-gradient(180deg, ${T.amber} 0%, #E08E28 100%)`, border: "none", borderRadius: "12px", color: "#1A1206", fontWeight: "800", fontSize: "1rem", cursor: "pointer", marginTop: "18px", letterSpacing: "0.5px", boxShadow: "0 6px 20px rgba(242,163,60,0.3)" },
+        resetBtn: { background: T.panel, border: `1px solid ${T.line}`, color: T.textDim, padding: "6px 12px", borderRadius: "8px", cursor: "pointer", fontSize: "0.7rem", fontWeight: "600" },
+        exportBtn: (copied) => ({ background: copied ? "rgba(45,212,167,0.12)" : T.panel, border: `1px solid ${copied ? T.teal : T.line}`, color: copied ? T.teal : T.textDim, padding: "6px 12px", borderRadius: "8px", cursor: "pointer", fontSize: "0.7rem", fontWeight: "600" }),
+    };
+    // SETUP SCREEN
+    if (!draftStarted) {
+        return (React.createElement("div", { style: styles.app },
+            React.createElement("link", { href: "https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Inter:wght@400;500;600;700;800;900&display=swap", rel: "stylesheet" }),
+            React.createElement("div", { style: styles.setupScreen },
+                React.createElement("div", { style: { textAlign: "center", marginTop: "20px", marginBottom: "28px" } },
+                    React.createElement("div", { style: { fontSize: "0.62rem", color: T.amber, letterSpacing: "4px", textTransform: "uppercase", fontWeight: "700", marginBottom: "10px" } }, "Est. 2013 \u00B7 Keeper League"),
+                    React.createElement("div", { style: { fontFamily: "'Bebas Neue', sans-serif", fontSize: "3.4rem", lineHeight: 0.92, letterSpacing: "1px", color: T.text } }, "BREW BOWL"),
+                    React.createElement("div", { style: { fontFamily: "'Bebas Neue', sans-serif", fontSize: "1.4rem", letterSpacing: "6px", color: T.amber, marginTop: "2px" } }, "DRAFT ROOM"),
+                    React.createElement("div", { style: { width: "48px", height: "3px", background: T.amber, borderRadius: "2px", margin: "16px auto 0" } })),
+                React.createElement("div", { style: { fontSize: "0.68rem", color: T.textFaint, letterSpacing: "2px", textTransform: "uppercase", marginBottom: "12px", textAlign: "center", fontWeight: "700" } }, "Choose your seat"),
+                React.createElement("div", { style: { display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "9px", marginBottom: "6px" } }, DRAFT_ORDER[1].map((m, i) => (React.createElement("button", { key: m, style: styles.mgr_btn(m, myManager === m), onClick: () => setMyManager(m), onMouseEnter: e => { if (myManager !== m)
+                        e.currentTarget.style.borderColor = T.lineHi; }, onMouseLeave: e => { if (myManager !== m)
+                        e.currentTarget.style.borderColor = T.line; } },
+                    React.createElement("span", { style: { fontSize: "0.6rem", color: myManager === m ? T.amber : T.textFaint, fontWeight: "800", marginRight: "5px" } },
+                        i + 1,
+                        "."),
+                    m)))),
+                React.createElement("div", { style: { fontSize: "0.66rem", color: T.textFaint, textAlign: "center", margin: "14px 0 4px", lineHeight: 1.5 } }, "Seats are in 2026 draft order \uD83C\uDFC6 \u2014 set by the World Cup (Spain won \u2192 Tim picks 1.01). The rest of the league auto-drafts using each manager's real keepers, needs, and rookie tendencies."),
+                React.createElement("button", { style: { ...styles.startBtn, opacity: myManager ? 1 : 0.45, cursor: myManager ? "pointer" : "default" }, onClick: () => { if (myManager) {
+                        setDraftStarted(true);
+                        setActiveTab("draft");
+                    } } }, myManager ? `Draft as ${myManager}` : "Select a manager"),
+                myManager && MANAGER_INTRO[myManager] && (React.createElement("div", { style: { marginTop: "14px", padding: "12px 14px", background: T.panel, border: `1px solid ${T.line}`, borderLeft: `3px solid ${T.amber}`, borderRadius: "12px" } },
+                    React.createElement("div", { style: { fontSize: "0.58rem", fontWeight: "800", letterSpacing: "1.5px", color: T.amber, marginBottom: "4px" } },
+                        "2025 FINISH: #",
+                        LAST_STANDINGS[myManager],
+                        " OF 12"),
+                    React.createElement("div", { style: { fontSize: "0.78rem", color: T.text, lineHeight: 1.5 } }, MANAGER_INTRO[myManager]))),
+                React.createElement("button", { style: { ...styles.startBtn, background: "transparent", border: `1px solid ${T.line}`, color: T.textDim, boxShadow: "none", marginTop: "10px", fontWeight: "700" }, onClick: () => { setMyManager(null); setDraftStarted(true); setActiveTab("draft"); } }, "Manual mode \u00B7 pick every team"),
+                React.createElement("div", { onClick: () => setChaosMode(!chaosMode), style: { display: "flex", alignItems: "center", justifyContent: "space-between", marginTop: "20px", padding: "12px 14px", background: T.panel, border: `1px solid ${chaosMode ? T.amber : T.line}`, borderRadius: "12px", cursor: "pointer" } },
+                    React.createElement("div", { style: { flex: 1 } },
+                        React.createElement("div", { style: { fontSize: "0.82rem", fontWeight: "700", color: T.text } },
+                            "\uD83C\uDFB2 Gut-Pick Mode ",
+                            chaosMode ? "ON" : "OFF"),
+                        React.createElement("div", { style: { fontSize: "0.64rem", color: T.textFaint, marginTop: "2px", lineHeight: 1.4 } }, chaosMode ? "Managers reach & follow their gut — every draft plays out differently." : "Strict rankings — the same chalk draft every time.")),
+                    React.createElement("div", { style: { width: "44px", height: "24px", borderRadius: "999px", background: chaosMode ? T.amber : T.line, position: "relative", transition: "all 0.2s", flexShrink: 0, marginLeft: "12px" } },
+                        React.createElement("div", { style: { width: "18px", height: "18px", borderRadius: "50%", background: "#fff", position: "absolute", top: "3px", left: chaosMode ? "23px" : "3px", transition: "all 0.2s" } }))),
+                savedMocks.length > 0 && (React.createElement("div", { style: { marginTop: "20px" } },
+                    React.createElement("div", { style: { fontSize: "0.62rem", fontWeight: "800", letterSpacing: "1.5px", color: T.textDim, marginBottom: "8px" } }, "\u2B50 SAVED MOCKS"),
+                    savedMocks.map(m => (React.createElement("div", { key: m.id, style: { display: "flex", alignItems: "center", justifyContent: "space-between", background: T.panel, border: `1px solid ${T.line}`, borderRadius: "10px", padding: "10px 12px", marginBottom: "6px" } },
+                        React.createElement("div", { onClick: () => setViewMock(m), style: { fontSize: "0.75rem", fontWeight: "700", color: T.text, cursor: "pointer", flex: 1 } },
+                            "\uD83D\uDCCB ",
+                            m.label),
+                        React.createElement("button", { onClick: () => deleteMock(m.id), style: { background: "transparent", border: "none", color: T.textFaint, cursor: "pointer", fontSize: "0.85rem", padding: "2px 6px" } }, "\uD83D\uDDD1")))))),
+                React.createElement("div", { style: { fontSize: "0.56rem", color: T.textFaint, textAlign: "center", marginTop: "22px", letterSpacing: "1px", lineHeight: 1.7 } },
+                    "BBFL EST. 2013 \u00B7 FINAL WORLD CUP DRAFT ORDER \uD83C\uDFC6 ESPA\u00D1A",
+                    React.createElement("br", null),
+                    "RANKINGS ALIGNED TO CONSENSUS \u00B7 AUG 5, 2026")),
+            viewMock && (React.createElement("div", { onClick: () => setViewMock(null), style: { position: "fixed", inset: 0, background: "rgba(5,8,18,0.85)", zIndex: 60, display: "flex", alignItems: "center", justifyContent: "center", padding: "18px" } },
+                React.createElement("div", { onClick: e => e.stopPropagation(), style: { background: T.panelHi, border: `1px solid ${T.line}`, borderRadius: "16px", padding: "16px", maxWidth: "460px", width: "100%", maxHeight: "82vh", overflowY: "auto" } },
+                    React.createElement("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "12px" } },
+                        React.createElement("div", { style: { fontFamily: "'Bebas Neue', sans-serif", fontSize: "1.2rem", letterSpacing: "1px", color: T.text } },
+                            "\uD83D\uDCCB ",
+                            viewMock.label),
+                        React.createElement("button", { onClick: () => setViewMock(null), style: { background: "transparent", border: "none", color: T.textDim, cursor: "pointer", fontSize: "1rem" } }, "\u2715")),
+                    [...new Set(viewMock.picks.map(p => p.m))].map(mgr => (React.createElement("div", { key: mgr, style: { marginBottom: "12px" } },
+                        React.createElement("div", { style: { fontSize: "0.8rem", fontWeight: "800", color: MGR_COLORS[mgr] || T.text, marginBottom: "4px" } }, mgr),
+                        React.createElement("div", { style: { fontSize: "0.68rem", color: T.textDim, lineHeight: 1.7 } }, viewMock.picks.filter(p => p.m === mgr).map(p => `R${p.r} ${p.n} (${p.pos})`).join(" · "))))))))));
+    }
+    return (React.createElement("div", { style: styles.app },
+        React.createElement("link", { href: "https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Inter:wght@400;500;600;700;800;900&display=swap", rel: "stylesheet" }),
+        React.createElement("div", { style: styles.header },
+            React.createElement("div", { style: styles.title },
+                React.createElement("span", { style: { display: "inline-block", width: "8px", height: "8px", borderRadius: "2px", background: T.amber, boxShadow: `0 0 10px ${T.amber}` } }),
+                "BREW BOWL"),
+            React.createElement("div", { style: { display: "flex", gap: "6px" } },
+                (myManager || manualMode) && !finishAuto && !isDone && (React.createElement("button", { style: { ...styles.resetBtn, borderColor: "#22c55e", color: "#22c55e" }, onClick: () => setFinishAuto(true) }, "\u26A1 Finish Auto")),
+                finishAuto && !isDone && (React.createElement("button", { style: { ...styles.resetBtn, borderColor: "#f59e0b", color: "#f59e0b" }, onClick: () => setFinishAuto(false) }, "\u23F8 Pause")),
+                !isDone && picks.length > 0 && (React.createElement("button", { style: styles.resetBtn, onClick: undoLastPick }, "\u21A9 Undo")),
+                React.createElement("button", { style: styles.exportBtn(copied), onClick: exportRosters }, copied ? "✅ Copied!" : "📋 Export"),
+                React.createElement("button", { style: styles.exportBtn(false), onClick: exportPDF }, "\uD83D\uDCC4 PDF"),
+                React.createElement("button", { style: styles.resetBtn, onClick: resetDraft }, "\u21BA Reset"))),
+        exportText && (React.createElement("div", { style: { padding: "12px 18px", background: T.panelHi, borderBottom: `1px solid ${T.line}` } },
+            React.createElement("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "6px" } },
+                React.createElement("div", { style: { fontSize: "0.7rem", fontWeight: "700", color: T.amber, letterSpacing: "0.5px" } }, copied ? "✅ Copied to clipboard!" : "📋 Draft results — tap the box, select all, copy"),
+                React.createElement("button", { style: styles.resetBtn, onClick: () => setExportText("") }, "\u2715 Close")),
+            React.createElement("textarea", { readOnly: true, value: exportText, onFocus: e => e.target.select(), onClick: e => e.target.select(), style: { width: "100%", height: "120px", background: T.bg, border: `1px solid ${T.line}`, borderRadius: "8px", padding: "10px", color: T.text, fontSize: "0.7rem", fontFamily: "monospace", lineHeight: 1.5, resize: "vertical", outline: "none" } }))),
+        cardPlayer && (() => {
+            const cd = getPlayerCard(cardPlayer);
+            const outlook = cd.o === 1 ? { t: "📈 Trending up", c: "#2DD4A7" } : cd.o === -1 ? { t: "📉 Trending down", c: "#F2545B" } : { t: "➡️ Steady", c: "#8A96B4" };
+            return (React.createElement("div", { onClick: () => setCardPlayer(null), style: { position: "fixed", inset: 0, background: "rgba(5,8,18,0.85)", zIndex: 70, display: "flex", alignItems: "center", justifyContent: "center", padding: "18px" } },
+                React.createElement("div", { onClick: e => e.stopPropagation(), style: { background: T.panelHi, border: `1px solid ${T.line}`, borderTop: `3px solid ${POS_ACCENT[cardPlayer.pos]}`, borderRadius: "16px", padding: "18px", maxWidth: "420px", width: "100%", maxHeight: "80vh", overflowY: "auto" } },
+                    React.createElement("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: "10px" } },
+                        React.createElement("div", null,
+                            React.createElement("div", { style: { fontFamily: "'Bebas Neue', sans-serif", fontSize: "1.5rem", letterSpacing: "1px", color: T.text, lineHeight: 1.1 } }, displayName(cardPlayer.name)),
+                            React.createElement("div", { style: { fontSize: "0.68rem", color: T.textDim, marginTop: "3px" } },
+                                React.createElement("b", { style: { color: POS_ACCENT[cardPlayer.pos] } }, cardPlayer.pos),
+                                " \u00B7 ",
+                                cardPlayer.team,
+                                " \u00B7 Board #",
+                                cardPlayer.rank,
+                                ROOKIE_TIER[cardPlayer.name] && React.createElement("span", { style: { marginLeft: "6px", background: "#3b0764", color: "#e9d5ff", padding: "1px 6px", borderRadius: "10px", fontSize: "0.55rem", fontWeight: "700" } }, "ROOKIE"))),
+                        React.createElement("button", { onClick: () => setCardPlayer(null), style: { background: "transparent", border: "none", color: T.textDim, cursor: "pointer", fontSize: "1.05rem", padding: "2px" } }, "\u2715")),
+                    React.createElement("div", { style: { display: "flex", gap: "8px", marginBottom: "12px", flexWrap: "wrap" } },
+                        React.createElement("div", { style: { background: T.panel, border: `1px solid ${T.line}`, borderRadius: "8px", padding: "6px 10px" } },
+                            React.createElement("div", { style: { fontSize: "0.5rem", color: T.textFaint, letterSpacing: "1px", fontWeight: "800" } }, "2025 FINISH"),
+                            React.createElement("div", { style: { fontSize: "0.82rem", fontWeight: "800", color: T.amber } }, cd.f)),
+                        React.createElement("div", { style: { background: T.panel, border: `1px solid ${T.line}`, borderRadius: "8px", padding: "6px 10px" } },
+                            React.createElement("div", { style: { fontSize: "0.5rem", color: T.textFaint, letterSpacing: "1px", fontWeight: "800" } }, "2026 OUTLOOK"),
+                            React.createElement("div", { style: { fontSize: "0.82rem", fontWeight: "800", color: outlook.c } }, outlook.t))),
+                    React.createElement("div", { style: { fontSize: "0.68rem", color: T.textDim, marginBottom: "10px", fontStyle: "italic" } }, cd.s),
+                    React.createElement("div", { style: { fontSize: "0.8rem", color: T.text, lineHeight: 1.6, marginBottom: cd.n ? "10px" : "14px" } }, cd.b),
+                    cd.n && (React.createElement("div", { style: { background: "#2a1215", border: "1px solid #4c1d24", borderRadius: "10px", padding: "10px 12px", marginBottom: "14px" } },
+                        React.createElement("div", { style: { fontSize: "0.52rem", fontWeight: "800", letterSpacing: "1.5px", color: "#F2545B", marginBottom: "3px" } }, "\uD83D\uDEA8 NEWS"),
+                        React.createElement("div", { style: { fontSize: "0.72rem", color: "#fecaca", lineHeight: 1.5 } }, cd.n))),
+                    React.createElement("div", { style: { display: "flex", gap: "8px" } },
+                        showPicker && !takenNames.has(cardPlayer.name) && (React.createElement("button", { onClick: () => { draftPlayer(cardPlayer); setCardPlayer(null); }, style: { flex: 1, padding: "11px", background: "linear-gradient(135deg, #F2A33C, #e08b1a)", border: "none", borderRadius: "10px", color: "#0B1020", fontWeight: "800", fontSize: "0.82rem", cursor: "pointer", letterSpacing: "0.5px" } }, "\uD83C\uDFC8 DRAFT HIM")),
+                        React.createElement("button", { onClick: () => setCardPlayer(null), style: { flex: 1, padding: "11px", background: "transparent", border: `1px solid ${T.line}`, borderRadius: "10px", color: T.textDim, fontWeight: "700", fontSize: "0.82rem", cursor: "pointer" } }, "Close")))));
+        })(),
+        React.createElement("div", { style: styles.tabs },
+            React.createElement("button", { style: styles.tab(activeTab === "draft"), onClick: () => setActiveTab("draft") }, "Draft"),
+            React.createElement("button", { style: styles.tab(activeTab === "rosters"), onClick: () => setActiveTab("rosters") }, "Rosters"),
+            React.createElement("button", { style: styles.tab(activeTab === "lineups"), onClick: () => setActiveTab("lineups") }, "Lineups"),
+            React.createElement("button", { style: styles.tab(activeTab === "order"), onClick: () => setActiveTab("order") }, "Pick Order")),
+        activeTab === "draft" && (React.createElement(React.Fragment, null, isDone ? (React.createElement("div", { style: { textAlign: "center", padding: "40px" } },
+            React.createElement("div", { style: { fontSize: "2rem", marginBottom: "8px" } }, "\uD83C\uDF89"),
+            React.createElement("div", { style: { fontSize: "1.2rem", color: "#22c55e", fontWeight: "700" } }, "Draft Complete!"),
+            React.createElement("div", { style: { fontSize: "0.8rem", color: "#6b7280", marginTop: "6px" } },
+                "Tap ",
+                React.createElement("b", { style: { color: "#93c5fd" } }, "Lineups"),
+                " to see every team's starters & bench"),
+            React.createElement("div", { style: { display: "flex", gap: "8px", justifyContent: "center", marginTop: "16px", flexWrap: "wrap" } },
+                React.createElement("button", { style: { ...styles.startBtn, width: "auto", padding: "10px 20px", background: "#1e3a5f", margin: 0 }, onClick: () => setActiveTab("lineups") }, "View Lineups"),
+                React.createElement("button", { style: { ...styles.startBtn, width: "auto", padding: "10px 20px", margin: 0 }, onClick: resetDraft }, "New Draft"),
+                React.createElement("button", { style: { ...styles.startBtn, width: "auto", padding: "10px 20px", background: mockSaved ? "#14532d" : "#3d2c0f", margin: 0 }, onClick: saveMock }, mockSaved ? "✅ Saved!" : "⭐ Save Mock")))) : (React.createElement(React.Fragment, null,
+            React.createElement("div", { style: isMyTurn ? styles.myTurnBanner : styles.pickBanner },
+                React.createElement("div", { style: { flex: 1 } },
+                    React.createElement("div", { style: { fontSize: "0.75rem", color: showPicker ? "#4ade80" : "#93c5fd", fontWeight: "600" } },
+                        finishAuto ? "⚡ Auto-finishing draft..." : isMyTurn ? "🟢 YOUR PICK" : manualMode ? "✍️ Manual Pick" : autoRunning ? "⚡ CPU Drafting..." : "⏳ CPU On Clock",
+                        " \u00B7 Pick ",
+                        picks.length + 1,
+                        " \u00B7 Round ",
+                        currentRound,
+                        currentRound > 14 ? " (Makeup)" : ""),
+                    React.createElement("div", { style: { fontSize: "1.1rem", fontWeight: "700", color: MGR_COLORS[currentManager] } },
+                        currentManager,
+                        " ",
+                        showPicker ? "— On The Clock" : ""),
+                    React.createElement("div", { style: { display: "flex", gap: "5px", marginTop: "5px", flexWrap: "wrap" } },
+                        ["RB", "WR", "QB", "TE"].map(pos => {
+                            const { counts } = getRosterCounts(currentManager, picks);
+                            const limit = ROSTER_LIMITS[pos];
+                            const filled = counts[pos] >= limit;
+                            return (React.createElement("div", { key: pos, style: { display: "flex", alignItems: "center", gap: "3px", background: filled ? "#052e16" : "#1f1010", border: `1px solid ${filled ? "#14532d" : "#3f1010"}`, borderRadius: "5px", padding: "2px 7px", fontSize: "0.62rem", fontWeight: "700" } },
+                                React.createElement("span", { style: { color: filled ? "#4ade80" : "#f87171" } },
+                                    pos,
+                                    " ",
+                                    counts[pos],
+                                    "/",
+                                    limit)));
+                        }),
+                        React.createElement("div", { style: { display: "flex", alignItems: "center", gap: "3px", background: "#1f2937", border: "1px solid #374151", borderRadius: "5px", padding: "2px 7px", fontSize: "0.62rem", fontWeight: "700", color: "#9ca3af" } },
+                            picks.filter(p => p.manager === currentManager).length,
+                            "/",
+                            TOTAL_ROSTER,
+                            " picks"))),
+                React.createElement("div", { style: { fontSize: "0.65rem", color: "#4b5563", textAlign: "right" } },
+                    "Up next:",
+                    React.createElement("br", null),
+                    (() => {
+                        const upcoming = [];
+                        let r = currentRound, s = currentSlot + 1;
+                        while (upcoming.length < 3 && r <= totalRounds) {
+                            const order = DRAFT_ORDER[r];
+                            if (!order || s >= order.length) {
+                                r++;
+                                s = 0;
+                                continue;
+                            }
+                            const mgr = order[s];
+                            if (!isRosterFull(mgr, picks))
+                                upcoming.push(mgr);
+                            s++;
+                        }
+                        return upcoming.join(" → ");
+                    })())),
+            showPicker && (React.createElement(React.Fragment, null,
+                React.createElement("div", { style: styles.searchBar },
+                    React.createElement("input", { style: styles.input, placeholder: "Search players...", value: search, onChange: e => setSearch(e.target.value) }),
+                    ["ALL", "FLEX", "RB", "WR", "QB", "TE", "ROOKIE"].map(pos => (React.createElement("button", { key: pos, style: styles.filterBtn(filterPos === pos, pos), onClick: () => setFilterPos(pos) }, pos === "ROOKIE" ? "★ ROOKIE" : pos)))),
+                React.createElement("div", { style: styles.playerList },
+                    filterPos === "ROOKIE" && (React.createElement("div", { style: { fontSize: "0.66rem", color: "#c4b5fd", background: "rgba(139,92,246,0.08)", border: "1px solid #4c1d95", borderRadius: "8px", padding: "8px 11px", marginBottom: "8px", lineHeight: 1.4 } }, "\u2605 = top rookie (Round 1 value). Hitting on a rookie locks a 3-year keeper window \u2014 draft yr 1, rookie keeper yr 2, vet keeper yr 3.")),
+                    (() => {
+                        // Decide tier mode: positional when filtered to a position, overall on ALL/ROOKIE
+                        const usePosTiers = ["QB", "RB", "WR", "TE"].includes(filterPos);
+                        let lastTier = null;
+                        const rows = [];
+                        availablePlayers.forEach(player => {
+                            const tierNum = usePosTiers ? positionalTier(player.name) : overallTier(player.rank);
+                            if (filterPos !== "FLEX" && tierNum !== lastTier) {
+                                lastTier = tierNum;
+                                const vt = valueTier(player.rank, player.pos, player.name);
+                                rows.push(React.createElement("div", { key: `tier-${filterPos}-${tierNum}`, style: { display: "flex", alignItems: "center", gap: "8px", margin: "12px 2px 6px" } },
+                                    React.createElement("div", { style: { fontSize: "0.6rem", fontWeight: "800", letterSpacing: "1px", color: vt.color, whiteSpace: "nowrap" } }, usePosTiers ? `${filterPos} TIER ${tierNum}` : `TIER ${tierNum}`),
+                                    React.createElement("div", { style: { flex: 1, height: "1px", background: `linear-gradient(90deg, ${vt.color}55, transparent)` } })));
+                            }
+                            rows.push(React.createElement("div", { key: player.name, style: { ...styles.playerRow, borderLeft: `3px solid ${POS_ACCENT[player.pos]}`, ...(player.name === suggestedName ? { background: "#12241a", borderColor: "#14532d", borderLeft: `3px solid ${POS_ACCENT[player.pos]}` } : {}) }, onClick: () => draftPlayer(player), onMouseEnter: e => e.currentTarget.style.background = "#1f2937", onMouseLeave: e => e.currentTarget.style.background = player.name === suggestedName ? "#12241a" : "#111827" },
+                                React.createElement("div", { style: { display: "flex", alignItems: "center", gap: "10px" } },
+                                    React.createElement("div", { style: { fontSize: "0.65rem", color: "#4b5563", minWidth: "24px" } },
+                                        "#",
+                                        player.rank),
+                                    React.createElement("div", null,
+                                        React.createElement("div", { style: { fontSize: "0.92rem", fontWeight: "800", color: "#f3f4f6", letterSpacing: "0.2px" } },
+                                            displayName(player.name),
+                                            player.name === suggestedName && (React.createElement("span", { style: { fontSize: "0.5rem", background: "#052e16", color: "#4ade80", padding: "1px 6px", borderRadius: "10px", fontWeight: "700", marginLeft: "6px", letterSpacing: "0.5px", verticalAlign: "middle", border: "1px solid #14532d" } }, "\u2713 PICK")),
+                                            ROOKIE_TIER[player.name] && (React.createElement("span", { style: { fontSize: "0.5rem", background: "#3b0764", color: "#e9d5ff", padding: "1px 5px", borderRadius: "10px", fontWeight: "700", marginLeft: "6px", letterSpacing: "0.5px", verticalAlign: "middle" } }, ROOKIE_TIER[player.name] === 1 ? "★ ROOKIE" : "ROOKIE"))),
+                                        React.createElement("div", { style: { fontSize: "0.65rem", color: "#6b7280" } }, player.team))),
+                                React.createElement("div", { style: { display: "flex", alignItems: "center", gap: "6px" } },
+                                    React.createElement("span", { onClick: (e) => { e.stopPropagation(); setCardPlayer(player); }, style: { fontSize: "0.72rem", color: "#8A96B4", cursor: "pointer", padding: "3px 7px", background: "#1b2338", borderRadius: "50%", border: "1px solid #252E45", lineHeight: 1 } }, "\u24D8"),
+                                    React.createElement("div", { style: { fontSize: "0.5rem", fontWeight: "700", color: valueTier(player.rank, player.pos, player.name).color, letterSpacing: "0.5px" } }, usePosTiers ? `${player.pos}${positionalTier(player.name)}` : `T${overallTier(player.rank)}`),
+                                    React.createElement("div", { style: { ...POS_STYLE(player.pos), fontSize: "0.6rem", fontWeight: "700", padding: "2px 6px", borderRadius: "4px" } }, player.pos))));
+                        });
+                        return rows;
+                    })(),
+                    PLAYERS.filter(p => takenNames.has(p.name)).filter(p => filterPos === "ROOKIE" ? ROOKIE_TIER[p.name] : filterPos === "FLEX" ? p.pos !== "QB" : (filterPos === "ALL" || p.pos === filterPos)).filter(p => !search || p.name.toLowerCase().includes(search.toLowerCase())).map(player => (React.createElement("div", { key: player.name, style: styles.takenRow },
+                        React.createElement("div", { style: { display: "flex", alignItems: "center", gap: "10px" } },
+                            React.createElement("div", { style: { fontSize: "0.65rem", color: "#374151", minWidth: "24px" } },
+                                "#",
+                                player.rank),
+                            React.createElement("div", { style: { fontSize: "0.85rem", fontWeight: "600", color: "#374151" } },
+                                player.name,
+                                " \u2713")),
+                        React.createElement("div", { style: { ...POS_STYLE(player.pos), fontSize: "0.6rem", fontWeight: "700", padding: "2px 6px", borderRadius: "4px", opacity: 0.3 } }, player.pos))))))),
+            !showPicker && (React.createElement("div", { style: { padding: "20px 16px", textAlign: "center" } },
+                React.createElement("div", { style: { fontSize: "0.8rem", color: "#4b5563", marginBottom: "12px" } },
+                    "CPU is drafting for ",
+                    currentManager,
+                    "..."),
+                React.createElement("div", { style: { display: "flex", justifyContent: "center", gap: "6px" } }, [0, 1, 2].map(i => (React.createElement("div", { key: i, style: { width: "8px", height: "8px", borderRadius: "50%", background: MGR_COLORS[currentManager], opacity: autoRunning ? 1 : 0.3, animation: autoRunning ? `pulse ${0.6 + i * 0.2}s ease-in-out infinite alternate` : "none" } })))),
+                picks.length > 0 && (React.createElement("div", { style: { marginTop: "16px", background: "#111827", borderRadius: "10px", padding: "12px" } },
+                    React.createElement("div", { style: { fontSize: "0.65rem", color: "#4b5563", letterSpacing: "1px", marginBottom: "6px" } }, "LAST PICK"),
+                    React.createElement("div", { style: { fontSize: "0.85rem", fontWeight: "700", color: "#f3f4f6" } }, displayName(picks[picks.length - 1].player.name)),
+                    React.createElement("div", { style: { fontSize: "0.7rem", color: MGR_COLORS[picks[picks.length - 1].manager] } }, picks[picks.length - 1].manager))))))))),
+        activeTab === "rosters" && (React.createElement("div", { style: styles.rosterGrid }, DRAFT_ORDER[1].map((mgr, seatIdx) => {
+            const { counts, draftedTotal } = getRosterCounts(mgr, picks);
+            const full = isRosterFull(mgr, picks);
+            return (React.createElement("div", { key: mgr, style: { ...styles.rosterCard, borderColor: mgr === myManager ? MGR_COLORS[mgr] : "#1f2937" } },
+                React.createElement("div", { style: { position: "absolute", left: 0, top: 0, bottom: 0, width: "3px", background: MGR_COLORS[mgr], borderRadius: "10px 0 0 10px" } }),
+                React.createElement("div", { style: { paddingLeft: "8px" } },
+                    React.createElement("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "5px" } },
+                        React.createElement("div", { style: { fontWeight: "700", fontSize: "0.85rem", color: MGR_COLORS[mgr] } },
+                            React.createElement("span", { style: { color: T.textFaint, fontWeight: "800", fontSize: "0.7rem", marginRight: "5px" } }, seatIdx + 1),
+                            mgr,
+                            " ",
+                            mgr === myManager ? "👤" : ""),
+                        full && React.createElement("div", { style: { fontSize: "0.55rem", background: "#052e16", color: "#4ade80", padding: "2px 5px", borderRadius: "4px", fontWeight: "700" } }, "FULL")),
+                    React.createElement("div", { style: { display: "flex", gap: "4px", marginBottom: "5px", flexWrap: "wrap" } }, ["RB", "WR", "QB", "TE"].map(pos => (React.createElement("div", { key: pos, style: { fontSize: "0.55rem", padding: "1px 5px", borderRadius: "3px", ...POS_STYLE(pos), opacity: counts[pos] >= ROSTER_LIMITS[pos] ? 1 : 0.4 } },
+                        pos,
+                        " ",
+                        counts[pos],
+                        "/",
+                        ROSTER_LIMITS[pos])))),
+                    React.createElement("div", { style: { fontSize: "0.58rem", color: "#4b5563", marginBottom: "3px", letterSpacing: "1px" } }, "KEEPERS"),
+                    KEEPERS.filter(k => k.manager === mgr).map(k => (React.createElement("div", { key: k.name, style: { fontSize: "0.65rem", color: "#9ca3af", marginBottom: "1px" } },
+                        React.createElement("span", { style: { ...POS_STYLE(k.pos), fontSize: "0.5rem", padding: "1px 4px", borderRadius: "3px", marginRight: "4px" } }, k.pos),
+                        k.name))),
+                    rosters[mgr].drafted.length > 0 && (React.createElement(React.Fragment, null,
+                        React.createElement("div", { style: { fontSize: "0.58rem", color: "#4b5563", margin: "5px 0 3px", letterSpacing: "1px" } }, "DRAFTED"),
+                        rosters[mgr].drafted.map(p => (React.createElement("div", { key: p.player.name, style: { fontSize: "0.65rem", color: "#6b7280", marginBottom: "1px" } },
+                            React.createElement("span", { style: { color: "#374151", marginRight: "3px" } },
+                                "R",
+                                p.round),
+                            React.createElement("span", { style: { ...POS_STYLE(p.player.pos), fontSize: "0.5rem", padding: "1px 4px", borderRadius: "3px", marginRight: "4px" } }, p.player.pos),
+                            p.player.name))))))));
+        }))),
+        activeTab === "lineups" && (React.createElement("div", { style: { padding: "12px 16px", overflowY: "auto", maxHeight: "calc(100vh - 160px)" } },
+            isDone && (() => {
+                const standings = predictedStandings(picks);
+                const { steals, reaches } = leagueStealsAndReaches(picks);
+                return (React.createElement(React.Fragment, null,
+                    React.createElement("div", { style: { background: "#0d1117", border: "1px solid #1f2937", borderRadius: "12px", padding: "12px", marginBottom: "12px" } },
+                        React.createElement("div", { style: { fontSize: "0.75rem", fontWeight: "700", color: "#fbbf24", letterSpacing: "1px", marginBottom: "8px" } }, "\uD83C\uDFC6 PREDICTED FINISH"),
+                        standings.map((t, i) => (React.createElement("div", { key: t.manager, style: { display: "flex", alignItems: "center", gap: "8px", marginBottom: "4px" } },
+                            React.createElement("div", { style: { fontSize: "0.7rem", color: "#4b5563", minWidth: "20px", fontWeight: "700" } }, i + 1),
+                            React.createElement("div", { style: { fontSize: "0.8rem", fontWeight: "700", color: MGR_COLORS[t.manager], minWidth: "52px" } }, t.manager),
+                            React.createElement("div", { style: { flex: 1, height: "8px", background: "#1f2937", borderRadius: "4px", overflow: "hidden" } },
+                                React.createElement("div", { style: { width: `${t.score}%`, height: "100%", background: MGR_COLORS[t.manager] } })),
+                            React.createElement("div", { style: { fontSize: "0.7rem", color: "#9ca3af", minWidth: "52px", textAlign: "right" } },
+                                gradeFromScore(t.score),
+                                " \u00B7 ",
+                                t.score))))),
+                    React.createElement("div", { style: { display: "grid", gridTemplateColumns: "1fr 1fr", gap: "8px", marginBottom: "12px" } },
+                        React.createElement("div", { style: { background: "#052e16", border: "1px solid #14532d", borderRadius: "12px", padding: "10px" } },
+                            React.createElement("div", { style: { fontSize: "0.7rem", fontWeight: "700", color: "#4ade80", marginBottom: "6px" } }, "\uD83D\uDCB0 BIGGEST STEALS"),
+                            steals.map((p, i) => (React.createElement("div", { key: i, style: { fontSize: "0.68rem", color: "#d1fae5", marginBottom: "3px" } },
+                                React.createElement("b", null, displayName(p.player.name)),
+                                " ",
+                                React.createElement("span", { style: { color: "#6b7280" } },
+                                    "#",
+                                    p.rank,
+                                    " \u2192 pick ",
+                                    p.overall,
+                                    " (",
+                                    p.manager,
+                                    ")"))))),
+                        React.createElement("div", { style: { background: "#2a0a0a", border: "1px solid #4c1010", borderRadius: "12px", padding: "10px" } },
+                            React.createElement("div", { style: { fontSize: "0.7rem", fontWeight: "700", color: "#f87171", marginBottom: "6px" } }, "\uD83D\uDCC8 BIGGEST REACHES"),
+                            reaches.map((p, i) => (React.createElement("div", { key: i, style: { fontSize: "0.68rem", color: "#fecaca", marginBottom: "3px" } },
+                                React.createElement("b", null, displayName(p.player.name)),
+                                " ",
+                                React.createElement("span", { style: { color: "#6b7280" } },
+                                    "#",
+                                    p.rank,
+                                    " \u2192 pick ",
+                                    p.overall,
+                                    " (",
+                                    p.manager,
+                                    ")"))))))));
+            })(),
+            React.createElement("div", { style: { fontSize: "0.7rem", color: "#4b5563", letterSpacing: "1px", marginBottom: "10px", textAlign: "center" } },
+                "STARTING LINEUPS \u00B7 1 QB \u00B7 2 RB \u00B7 3 WR \u00B7 1 TE \u00B7 1 FLEX",
+                isDone ? " · SORTED BY PROJECTED FINISH" : " · IN DRAFT ORDER"),
+            (isDone
+                ? predictedStandings(picks).map(s => s.manager)
+                : DRAFT_ORDER[1]).map((mgr, rowIdx) => {
+                const seatIdx = DRAFT_ORDER[1].indexOf(mgr);
+                const { starters, bench } = buildLineup(mgr, picks);
+                const overall = teamOverall(mgr, picks);
+                const grade = gradeFromScore(overall);
+                const synopsis = teamSynopsis(mgr, picks);
+                const strength = positionStrength(mgr, picks);
+                return (React.createElement("div", { key: mgr, style: { background: "#111827", border: `1px solid ${mgr === myManager ? MGR_COLORS[mgr] : "#1f2937"}`, borderRadius: "12px", padding: "12px", marginBottom: "12px" } },
+                    React.createElement("div", { style: { display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "8px" } },
+                        React.createElement("div", { style: { fontWeight: "700", fontSize: "1rem", color: MGR_COLORS[mgr] } },
+                            React.createElement("span", { style: { color: isDone ? T.amber : T.textFaint, fontWeight: "800", fontSize: "0.78rem", marginRight: "6px" } }, isDone ? `#${rowIdx + 1}` : seatIdx + 1),
+                            mgr,
+                            " ",
+                            mgr === myManager ? "👤" : ""),
+                        isDone && (React.createElement("div", { style: { display: "flex", alignItems: "center", gap: "6px" } },
+                            React.createElement("div", { style: { fontSize: "1.1rem", fontWeight: "800", color: overall >= 74 ? "#4ade80" : overall >= 62 ? "#fbbf24" : "#f87171" } }, grade)))),
+                    isDone && (React.createElement(React.Fragment, null,
+                        React.createElement("div", { style: { display: "flex", gap: "6px", marginBottom: "8px" } }, ["RB", "WR", "QB", "TE"].map(pos => (React.createElement("div", { key: pos, style: { flex: 1 } },
+                            React.createElement("div", { style: { fontSize: "0.55rem", color: "#6b7280", marginBottom: "2px", display: "flex", justifyContent: "space-between" } },
+                                React.createElement("span", null, pos),
+                                React.createElement("span", null, strength[pos])),
+                            React.createElement("div", { style: { height: "5px", background: "#1f2937", borderRadius: "3px", overflow: "hidden" } },
+                                React.createElement("div", { style: { width: `${strength[pos]}%`, height: "100%", background: strength[pos] >= 70 ? "#4ade80" : strength[pos] >= 55 ? "#fbbf24" : "#f87171" } })))))),
+                        React.createElement("div", { style: { fontSize: "0.68rem", color: "#9ca3af", lineHeight: 1.5, marginBottom: "8px", fontStyle: "italic", borderLeft: `2px solid ${MGR_COLORS[mgr]}`, paddingLeft: "8px" } }, synopsis))),
+                    React.createElement("div", { style: { fontSize: "0.6rem", color: "#4b5563", letterSpacing: "1px", marginBottom: "4px" } }, "STARTERS"),
+                    starters.map((s, i) => (React.createElement("div", { key: i, style: { display: "flex", alignItems: "center", gap: "8px", padding: "5px 8px", background: "#0d1117", borderRadius: "6px", marginBottom: "3px" } },
+                        React.createElement("div", { style: { fontSize: "0.6rem", fontWeight: "700", color: "#6b7280", minWidth: "36px", letterSpacing: "1px" } }, s.slot),
+                        s.player ? (React.createElement(React.Fragment, null,
+                            React.createElement("div", { style: { ...POS_STYLE(s.player.pos), fontSize: "0.55rem", fontWeight: "700", padding: "1px 5px", borderRadius: "3px" } }, s.player.pos),
+                            React.createElement("div", { style: { fontSize: "0.8rem", color: "#f3f4f6", fontWeight: "600", flex: 1 } }, displayName(s.player.name)),
+                            (() => {
+                                const t = valueTier(s.player.rank, s.player.pos, s.player.name);
+                                return (React.createElement("div", { style: { fontSize: "0.5rem", color: t.color, fontWeight: "700", letterSpacing: "0.5px" } }, t.label));
+                            })(),
+                            React.createElement("div", { style: { fontSize: "0.6rem", color: "#6b7280" } }, s.player.team),
+                            s.player.isKeeper && React.createElement("div", { style: { fontSize: "0.5rem", background: "#1e3a5f", color: "#93c5fd", padding: "1px 4px", borderRadius: "3px", fontWeight: "700" } }, s.player.keeperType === "Vet" ? "K-V" : "K-R"))) : (React.createElement("div", { style: { fontSize: "0.75rem", color: "#374151", fontStyle: "italic" } }, "empty"))))),
+                    bench.length > 0 && (React.createElement(React.Fragment, null,
+                        React.createElement("div", { style: { fontSize: "0.6rem", color: "#4b5563", letterSpacing: "1px", margin: "8px 0 4px" } }, "BENCH"),
+                        React.createElement("div", { style: { display: "flex", flexWrap: "wrap", gap: "4px" } }, bench.map(p => (React.createElement("div", { key: p.name, style: { display: "flex", alignItems: "center", gap: "4px", background: "#0d1117", borderRadius: "5px", padding: "3px 6px" } },
+                            React.createElement("div", { style: { ...POS_STYLE(p.pos), fontSize: "0.5rem", fontWeight: "700", padding: "1px 4px", borderRadius: "3px" } }, p.pos),
+                            React.createElement("div", { style: { fontSize: "0.7rem", color: "#9ca3af" } }, displayName(p.name)),
+                            p.isKeeper && React.createElement("div", { style: { fontSize: "0.45rem", background: "#1e3a5f", color: "#93c5fd", padding: "1px 3px", borderRadius: "3px", fontWeight: "700" } }, p.keeperType === "Vet" ? "K-V" : "K-R")))))))));
+            }))),
+        activeTab === "order" && (React.createElement("div", { style: { padding: "12px 18px 24px", overflowY: "auto", maxHeight: "calc(100vh - 170px)" } },
+            React.createElement("div", { style: { fontSize: "0.65rem", color: T.textFaint, letterSpacing: "2px", marginBottom: "12px", textAlign: "center", fontWeight: "700" } }, "DRAFT ORDER \u00B7 PICK BY PICK \u00B7 R15-16 = MAKEUP"),
+            picks.length === 0 && (React.createElement("div", { style: { textAlign: "center", color: T.textFaint, fontSize: "0.8rem", padding: "20px" } }, "No picks yet \u2014 the board fills in here as the draft runs.")),
+            picks.map((pick, i) => {
+                const overall = i + 1;
+                const roundNo = pick.round;
+                const isRookie = ROOKIE_TIER[pick.player.name];
+                const startsRound = i === 0 || picks[i - 1].round !== roundNo;
+                return (React.createElement("div", { key: i },
+                    startsRound && (React.createElement("div", { style: { display: "flex", alignItems: "center", gap: "9px", margin: i === 0 ? "2px 0 8px" : "16px 0 8px" } },
+                        React.createElement("div", { style: { height: "1px", flex: 1, background: `linear-gradient(90deg, transparent, ${T.line})` } }),
+                        React.createElement("div", { style: { fontFamily: "'Bebas Neue', sans-serif", fontSize: "0.95rem", letterSpacing: "2px",
+                                color: roundNo > 14 ? T.amber : T.textDim, whiteSpace: "nowrap" } },
+                            "ROUND ",
+                            roundNo,
+                            roundNo > 14 ? " · MAKEUP" : ""),
+                        React.createElement("div", { style: { height: "1px", flex: 1, background: `linear-gradient(90deg, ${T.line}, transparent)` } }))),
+                    React.createElement("div", { style: {
+                            display: "flex", alignItems: "center", gap: "10px",
+                            padding: "9px 12px", borderRadius: "10px", marginBottom: "5px",
+                            background: T.panel, border: `1px solid ${T.line}`,
+                            borderLeft: `3px solid ${MGR_COLORS[pick.manager]}`,
+                        } },
+                        React.createElement("div", { style: { fontFamily: "'Bebas Neue', sans-serif", fontSize: "1.1rem", color: T.textDim, minWidth: "34px", textAlign: "center" } }, overall),
+                        React.createElement("div", { style: { fontSize: "0.55rem", color: T.textFaint, minWidth: "26px" } },
+                            "R",
+                            roundNo),
+                        React.createElement("div", { style: { ...POS_STYLE(pick.player.pos), fontSize: "0.55rem", fontWeight: "700", padding: "2px 6px", borderRadius: "4px" } }, pick.player.pos),
+                        React.createElement("div", { style: { flex: 1, minWidth: 0 } },
+                            React.createElement("div", { style: { fontSize: "0.85rem", fontWeight: "600", color: T.text, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" } },
+                                displayName(pick.player.name),
+                                isRookie && React.createElement("span", { style: { fontSize: "0.5rem", background: "#3b0764", color: "#e9d5ff", padding: "1px 5px", borderRadius: "10px", fontWeight: "700", marginLeft: "6px", verticalAlign: "middle" } }, isRookie === 1 ? "★ ROOKIE" : "ROOKIE")),
+                            React.createElement("div", { style: { fontSize: "0.6rem", color: T.textFaint } }, pick.player.team)),
+                        React.createElement("div", { style: { fontSize: "0.78rem", fontWeight: "700", color: MGR_COLORS[pick.manager] } }, pick.manager))));
+            }),
+            !isDone && currentManager && (React.createElement("div", { style: {
+                    display: "flex", alignItems: "center", gap: "10px",
+                    padding: "9px 12px", borderRadius: "10px", marginTop: "3px",
+                    background: "rgba(242,163,60,0.08)", border: `1px dashed ${T.amber}`,
+                } },
+                React.createElement("div", { style: { fontFamily: "'Bebas Neue', sans-serif", fontSize: "1.1rem", color: T.amber, minWidth: "34px", textAlign: "center" } }, picks.length + 1),
+                React.createElement("div", { style: { flex: 1, fontSize: "0.78rem", color: T.amber, fontWeight: "600" } }, "On the clock\u2026"),
+                React.createElement("div", { style: { fontSize: "0.78rem", fontWeight: "700", color: MGR_COLORS[currentManager] } }, currentManager))))),
+        React.createElement("style", null, `@keyframes pulse { from { opacity: 0.3; } to { opacity: 1; } }`)));
+}
+
+(function () {
+  try {
+    ReactDOM.createRoot(document.getElementById("root")).render(React.createElement(DraftSimulator));
+  } catch (err) {
+    document.getElementById("root").innerHTML =
+      '<div class="boot">Something went wrong loading the app.<br><br>' +
+      String(err && err.message ? err.message : err) + '</div>';
+    console.error(err);
+  }
+})();
+</script>
+</body>
+</html>
